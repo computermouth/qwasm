@@ -258,17 +258,10 @@ MINGW64_CROSS_GUESS := $(shell \
 # GCC version and option checking
 # --------------------------------
 
-cc-version = $(shell sh $(TOPDIR)/scripts/gcc-version \
-              $(if $(1), $(1), $(CC)))
-
-cc-option = $(shell if $(CC) $(CFLAGS) -Werror $(1) -S -o /dev/null -xc /dev/null \
-             > /dev/null 2>&1; then echo "$(1)"; else echo "$(2)"; fi ;)
-
 cc-i386 = $(if $(subst __i386,,$(shell echo __i386 | $(CC) -E -xc - | tail -n 1)),Y,N)
 
 libdir-check = $(shell if [ -d "$(1)" ]; then printf -- '-L%s' "$(1)"; fi)
 
-GCC_VERSION := $(call cc-version,)
 I386_GUESS  := $(call cc-i386)
 
 # -------------------------
@@ -285,7 +278,7 @@ WINDRES ?= windres
 
 CFLAGS ?=
 CFLAGS := $(CFLAGS) -Wall -Wno-trigraphs -Wwrite-strings
-CFLAGS += $(call cc-option,-std=gnu99)
+CFLAGS += -std=gnu99
 
 ifeq ($(G4),Y)
 # Playing with PPC OSX GCC Flags
@@ -318,22 +311,6 @@ CFLAGS += -g
 else
 ifeq ($(OPTIMIZED_CFLAGS),Y)
 CFLAGS += -O2
-# -funit-at-a-time is buggy for MinGW GCC > 3.2
-# I'm assuming it's fixed for MinGW GCC >= 4.0 when that comes about
-CFLAGS += $(shell if [ $(GCC_VERSION) -lt 0400 ] ;\
-		then echo $(call cc-option,-fno-unit-at-a-time,); fi ;)
-CFLAGS += $(call cc-option,-fweb,)
-CFLAGS += $(call cc-option,-frename-registers,)
-# Enable some math optimisations, but not -funsafe-math-optimisations,
-# which is causing problems with the software renderer currently.
-CFLAGS += $(call cc-option,-fno-math-errno)
-CFLAGS += $(call cc-option,-ffinite-math-only)
-CFLAGS += $(call cc-option,-fno-signaling-nans)
-# Enable tree vectorizer, but not on the old GCC on my PPC box,
-# because we get an internal compiler error compiling the MP3 decoder
-# :(
-CFLAGS += $(shell if [ $(GCC_VERSION) -gt 0401 ] ;\
-		then echo $(call cc-option,-ftree-vectorize,); fi ;)
 endif
 endif
 
