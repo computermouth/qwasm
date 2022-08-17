@@ -344,14 +344,8 @@ endif
 
 # (sw = software renderer, gl = OpenGL renderer, sv = server)
 NQSWDIR	= $(BUILD_DIR)/nqsw
-NQGLDIR	= $(BUILD_DIR)/nqgl
-QWSWDIR	= $(BUILD_DIR)/qwsw
-QWGLDIR	= $(BUILD_DIR)/qwgl
-QWSVDIR	= $(BUILD_DIR)/qwsv
 
-APPS =	tyr-quake$(EXT) tyr-glquake$(EXT) \
-	tyr-qwcl$(EXT) tyr-glqwcl$(EXT) \
-	tyr-qwsv$(EXT)
+APPS =	tyr-quake$(EXT)
 
 default:	all
 
