@@ -29,6 +29,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define VID_CBITS	6
 #define VID_GRADES	(1 << VID_CBITS)
 
+// TODO: Support more scaling options?
+#define VID_MAX_SCALE 4
+
 // a pixel can be one, two, or four bytes
 typedef byte pixel_t;
 
@@ -53,6 +56,12 @@ typedef struct {
     int conwidth;               // width of the console buffer in pixels
     int conheight;              // height of the console buffer in pixels
     pixel_t *direct;		// direct drawing to framebuffer, if not NULL
+    qboolean stretchblit;       // True if the video driver supports arbitrary scaling blit
+    struct {
+        int scale;              // Integer scaling factor.  Zero implies abitrary scale to window width/height.
+        int width;              // Output window resolution width/height
+        int height;             // Video driver may or may not support different render/output resolution
+    } output;
 } viddef_t;
 
 extern viddef_t vid;		// global video state
@@ -65,11 +74,19 @@ extern unsigned d_8to24table[256];
  * ------------------------------------------------------------------------
  */
 
+typedef struct render_resolution {
+    int scale;
+    int width;
+    int height;
+} render_resolution_t;
+
 typedef struct qvidmode_s {
     int width;
     int height;
     int bpp;
     int refresh;
+    int min_scale;
+    render_resolution_t resolution;
     byte driverdata[8]; /* Allow drivers to stuff some data */
 } qvidmode_t;
 
@@ -85,13 +102,20 @@ extern cvar_t vid_window_y;
 extern cvar_t vid_window_centered;
 extern cvar_t vid_window_remember_position;
 
-/* FIXME - vid mode testing */
-extern int vid_testingmode;
-extern int vid_realmode;
-extern double vid_testendtime;
+/* Vsync */
+extern qboolean vsync_available;
+extern qboolean adaptive_vsync_available;
+extern cvar_t vid_vsync;
+
+enum vid_vsync_state {
+    VSYNC_STATE_OFF,
+    VSYNC_STATE_ON,
+    VSYNC_STATE_ADAPTIVE,
+};
 
 void VID_Mode_RegisterVariables();
 void VID_Mode_AddCommands();
+void VID_Mode_SetupViddef(const qvidmode_t *mode, viddef_t *vid);
 void VID_SortModeList(qvidmode_t *modelist, int nummodes);
 const qvidmode_t *VID_GetCmdlineMode();
 const qvidmode_t *VID_GetModeFromCvars();

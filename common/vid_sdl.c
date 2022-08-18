@@ -69,7 +69,6 @@ static SDL_PixelFormat *sdl_format = NULL;
 static byte *vid_surfcache;
 static int vid_surfcachesize;
 static int VID_highhunkmark;
-static int window_width, window_height;
 
 unsigned short d_8to16table[256];
 unsigned d_8to24table[256];
@@ -111,11 +110,6 @@ VID_ShiftPalette(const byte *palette)
 }
 
 void VID_SetDefaultMode(void) { }
-
-static cvar_t vid_wait = { "vid_wait", "0" };
-static cvar_t vid_nopageflip = { "vid_nopageflip", "0", CVAR_VIDEO };
-static cvar_t _vid_wait_override = { "_vid_wait_override", "0", CVAR_VIDEO };
-static cvar_t block_switch = { "block_switch", "0", CVAR_VIDEO };
 
 static qboolean Minimized;
 
@@ -168,8 +162,7 @@ VID_AllocBuffers(int width, int height)
      * see if there's enough memory, allowing for the normal mode 0x13 pixel,
      * z, and surface buffers
      */
-    if ((host_parms.memsize - tbuffersize + SURFCACHE_SIZE_AT_320X200 +
-	 0x10000 * 3) < minimum_memory) {
+    if ((host_parms.memsize - tbuffersize + SURFCACHE_SIZE_AT_320X200 + 0x10000 * 3) < minimum_memory) {
 	Con_SafePrintf("Not enough memory for video mode\n");
 	return false;
     }
@@ -186,6 +179,12 @@ VID_AllocBuffers(int width, int height)
     d_pzbuffer = Hunk_HighAllocName(tbuffersize, "video");
     vid_surfcache = (byte *)d_pzbuffer + width * height * sizeof(*d_pzbuffer);
     r_warpbuffer = Hunk_HighAllocName(width * height, "warpbuf");
+
+    // In-memory buffer which we upload via SDL texture
+    vid.buffer = vid.conbuffer = vid.direct = Hunk_HighAllocName(width * height, "vidbuf");
+    vid.rowbytes = vid.conrowbytes = width;
+
+    R_AllocSurfEdges(false);
 
     return true;
 }
@@ -232,9 +231,19 @@ VID_SetMode(const qvidmode_t *mode, const byte *palette)
     if (!sdl_window)
 	Sys_Error("%s: Unable to create window: %s", __func__, SDL_GetError());
 
-    renderer = SDL_CreateRenderer(sdl_window, -1, SDL_RENDERER_ACCELERATED);
+    flags = vid_vsync.value ? SDL_RENDERER_PRESENTVSYNC : 0;
+    renderer = SDL_CreateRenderer(sdl_window, -1, flags);
+    if (!renderer && flags)
+        renderer = SDL_CreateRenderer(sdl_window, -1, 0);
     if (!renderer)
 	Sys_Error("%s: Unable to create renderer: %s", __func__, SDL_GetError());
+
+    /* Update vsync availability info based on renderer returned */
+    if (flags & SDL_RENDERER_PRESENTVSYNC) {
+        SDL_RendererInfo renderer_info;
+        SDL_GetRendererInfo(renderer, &renderer_info);
+        vsync_available = !!(renderer_info.flags & SDL_RENDERER_PRESENTVSYNC);
+    }
 
     texture = SDL_CreateTexture(renderer,
 				format->format,
@@ -248,21 +257,14 @@ VID_SetMode(const qvidmode_t *mode, const byte *palette)
     VID_SetPalette(palette);
     VID_InitColormap(palette);
 
+    VID_Mode_SetupViddef(mode, &vid);
+
     vid.numpages = 1;
-    vid.width = vid.conwidth = mode->width;
-    vid.height = vid.conheight = mode->height;
-    vid.aspect = ((float)vid.height / (float)vid.width) * (320.0 / 200.0);
+    vid.aspect = 1;//((float)vid.height / (float)vid.width) * (320.0 / 240.0);
 
     VID_AllocBuffers(vid.width, vid.height);
 
-    // In-memory buffer which we upload via SDL texture
-    vid.buffer = vid.conbuffer = vid.direct = Hunk_HighAllocName(vid.width * vid.height, "vidbuf");
-    vid.rowbytes = vid.conrowbytes = vid.width;
-
     D_InitCaches(vid_surfcache, vid_surfcachesize);
-
-    window_width = vid.width;
-    window_height = vid.height;
 
     vid_currentmode = mode;
 
@@ -287,9 +289,6 @@ VID_SetMode(const qvidmode_t *mode, const byte *palette)
 }
 
 /* ------------------------------------------------------------------------- */
-
-byte *VGA_pagebase;
-int VGA_width, VGA_height, VGA_rowbytes, VGA_bufferrowbytes = 0;
 
 void
 VID_SetPalette(const byte *palette)
@@ -358,10 +357,6 @@ VID_ProcessEvents()
 void
 VID_RegisterVariables()
 {
-    Cvar_RegisterVariable(&vid_wait);
-    Cvar_RegisterVariable(&vid_nopageflip);
-    Cvar_RegisterVariable(&_vid_wait_override);
-    Cvar_RegisterVariable(&block_switch);
 }
 
 void
@@ -395,14 +390,31 @@ VID_Init(const byte *palette)
 
     vid_menudrawfn = VID_MenuDraw;
     vid_menukeyfn = VID_MenuKey;
+
+    /* Assume vsync is available, we will set false if enable fails */
+    vsync_available = true;
+}
+
+static void
+VID_SDL_BlitRect(int x, int y, int width, int height)
+{
+    const float hscale = (float)vid.output.width / (float)vid.width;
+    const float vscale = (float)vid.output.height / (float)vid.height;
+
+    SDL_Rect src_rect = { x, y, width, height };
+    SDL_Rect dst_rect = { x * hscale, y * vscale, width * hscale, height * vscale };
+    int err = SDL_RenderCopy(renderer, texture, &src_rect, &dst_rect);
+    if (err)
+	Sys_Error("%s: unable to render texture (%s)", __func__, SDL_GetError());
+    SDL_RenderPresent(renderer);
 }
 
 void
 VID_Update(vrect_t *rects)
 {
-    SDL_Rect subrect;
     int i;
-    vrect_t *rect;
+    vrect_t *prect;
+    vrect_t rect;
     vrect_t fullrect;
     byte *src;
     void *dst;
@@ -416,56 +428,59 @@ VID_Update(vrect_t *rects)
      * If the palette changed, refresh the whole screen
      */
     if (palette_changed) {
-	palette_changed = false;
-	fullrect.x = 0;
-	fullrect.y = 0;
-	fullrect.width = vid.width;
-	fullrect.height = vid.height;
-	fullrect.pnext = NULL;
-	rects = &fullrect;
+        palette_changed = false;
+        fullrect.x = 0;
+        fullrect.y = 0;
+        fullrect.width = vid_currentmode->width;
+        fullrect.height = vid_currentmode->height;
+        fullrect.pnext = NULL;
+        rects = &fullrect;
     }
 
-    for (rect = rects; rect; rect = rect->pnext) {
-	subrect.x = rect->x;
-	subrect.y = rect->y;
-	subrect.w = rect->width;
-	subrect.h = rect->height;
-
-	err = SDL_LockTexture(texture, &subrect, (void **)&dst, &pitch);
-	if (err)
-	    Sys_Error("%s: unable to lock texture (%s)",
-		      __func__, SDL_GetError());
-	src = vid.buffer + rect->y * vid.width + rect->x;
-	height = subrect.h;
-	switch (SDL_PIXELTYPE(sdl_format->format)) {
-	case SDL_PIXELTYPE_PACKED32:
-	    dst32 = dst;
-	    while (height--) {
-		for (i = 0; i < rect->width; i++)
-		    dst32[i] = d_8to24table[src[i]];
-		dst32 += pitch / sizeof(*dst32);
-		src += vid.width;
-	    }
-	    break;
-	case SDL_PIXELTYPE_PACKED16:
-	    dst16 = dst;
-	    while (height--) {
-		for (i = 0; i < rect->width; i++)
-		    dst16[i] = d_8to16table[src[i]];
-		dst16 += pitch / sizeof(*dst16);
-		src += vid.width;
-	    }
-	    break;
-	default:
-	    Sys_Error("%s: unsupported pixel format (%s)", __func__,
-		      SDL_GetPixelFormatName(sdl_format->format));
-	}
-	SDL_UnlockTexture(texture);
-    }
-    err = SDL_RenderCopy(renderer, texture, NULL, NULL);
+    SDL_Rect lock_rect = { 0, 0, vid_currentmode->width, vid_currentmode->height };
+    err = SDL_LockTexture(texture, &lock_rect, (void **)&dst, &pitch);
     if (err)
-	Sys_Error("%s: unable to render texture (%s)", __func__, SDL_GetError());
-    SDL_RenderPresent(renderer);
+        Sys_Error("%s: unable to lock texture (%s)",
+                  __func__, SDL_GetError());
+
+    for (prect = rects; prect; prect = prect->pnext) {
+        rect = *prect;
+        if (rect.x >= lock_rect.w)
+            continue;
+        if (rect.y >= lock_rect.h)
+            continue;
+        if (rect.x + rect.width > lock_rect.w)
+            rect.width = lock_rect.w - rect.x;
+        if (rect.y + rect.height > lock_rect.h)
+            rect.height = lock_rect.h - rect.y;
+
+        src = vid.buffer + rect.y * vid.width + rect.x;
+        height = rect.height;
+        switch (SDL_PIXELTYPE(sdl_format->format)) {
+            case SDL_PIXELTYPE_PACKED32:
+                dst32 = dst;
+                while (height--) {
+                    for (i = 0; i < rect.width; i++)
+                        dst32[i] = d_8to24table[src[i]];
+                    dst32 += pitch / sizeof(*dst32);
+                    src += vid.width;
+                }
+                break;
+            case SDL_PIXELTYPE_PACKED16:
+                dst16 = dst;
+                while (height--) {
+                    for (i = 0; i < rect.width; i++)
+                        dst16[i] = d_8to16table[src[i]];
+                    dst16 += pitch / sizeof(*dst16);
+                    src += vid.width;
+                }
+                break;
+            default:
+                Sys_Error("%s: unsupported pixel format (%s)", __func__, SDL_GetPixelFormatName(sdl_format->format));
+        }
+    }
+    SDL_UnlockTexture(texture);
+    VID_SDL_BlitRect(0, 0, vid.width, vid.height);
 }
 
 void
@@ -496,11 +511,7 @@ D_BeginDirectRect(int x, int y, const byte *pbitmap, int width, int height)
 	src += width;
     }
     SDL_UnlockTexture(texture);
-
-    err = SDL_RenderCopy(renderer, texture, NULL, NULL);
-    if (err)
-	Sys_Error("%s: unable to render texture (%s)", __func__, SDL_GetError());
-    SDL_RenderPresent(renderer);
+    VID_SDL_BlitRect(x, y, width, height);
 }
 
 void
@@ -531,11 +542,7 @@ D_EndDirectRect(int x, int y, int width, int height)
 	src += vid.width;
     }
     SDL_UnlockTexture(texture);
-
-    err = SDL_RenderCopy(renderer, texture, NULL, NULL);
-    if (err)
-	Sys_Error("%s: unable to render texture (%s)", __func__, SDL_GetError());
-    SDL_RenderPresent(renderer);
+    VID_SDL_BlitRect(x, y, width, height);
 }
 
 void

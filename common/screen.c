@@ -111,6 +111,16 @@ qboolean scr_disabled_for_loading;
 qboolean scr_block_drawing;
 qboolean scr_skipupdate;
 
+static void
+SCR_SbarAlpha_f(cvar_t *cvar)
+{
+    if (cvar->value < 0.0f || cvar->value > 1.0f) {
+        cvar->value = qclamp(cvar->value, 0.0f, 1.0f);
+        Cvar_SetValue(cvar->name, cvar->value);
+    }
+}
+
+cvar_t scr_sbaralpha = { "scr_sbaralpha", "0.75", .flags = CVAR_CONFIG, .callback = SCR_SbarAlpha_f };
 static cvar_t scr_centertime = { "scr_centertime", "2" };
 static cvar_t scr_printspeed = { "scr_printspeed", "8" };
 
@@ -133,10 +143,11 @@ SCR_SetHudscale(float scale)
     }
 
     scr_scale = qclamp(scale, 0.25f, 16.0f);
-    scr_scaled_width = (int)((float)vid.conwidth / scr_scale);
-    scr_scaled_height = (int)((float)vid.conheight / scr_scale);
+    scr_scaled_width = SCR_ScaleCoord(vid.conwidth);
+    scr_scaled_height = SCR_ScaleCoord(vid.conheight);
 
     Con_CheckResize();
+
     vid.recalc_refdef = true; /* Since scaling of sb_lines has changed */
 }
 
@@ -186,7 +197,7 @@ SCR_Hudscale_f()
 }
 
 
-cvar_t scr_viewsize = { "viewsize", "100", CVAR_CONFIG };
+cvar_t scr_viewsize = { "viewsize", "110", .flags = CVAR_CONFIG };
 cvar_t scr_fov = { "fov", "90" };	// 10 - 170
 static cvar_t scr_conspeed = { "scr_conspeed", "300" };
 static cvar_t scr_showram = { "showram", "1" };
@@ -617,19 +628,49 @@ CalcFov
 ====================
 */
 static float
-CalcFov(float fov_x, float width, float height)
+SCR_CalcFovY(float fov_x, float width, float height)
 {
-    float a;
-    float x;
+    fov_x = qclamp(fov_x, 1.0f, 179.0f);
 
-    if (fov_x < 1 || fov_x > 179)
-	Sys_Error("Bad fov: %f", fov_x);
-
-    x = width / tan(fov_x / 360 * M_PI);
-    a = atan(height / x);
+    float x = width / tan(fov_x / 360 * M_PI);
+    float a = atan(height / x);
     a = a * 360 / M_PI;
 
     return a;
+}
+
+static float
+SCR_CalcFovX(float fov_y, float width, float height)
+{
+    fov_y = qclamp(fov_y, 1.0f, 179.0f);
+
+    float y = height / tan(fov_y / 360 * M_PI);
+    float a = atan(width / y);
+    a = a * 360 / M_PI;
+
+    return a;
+}
+
+void
+SCR_CalcFOV(refdef_t *refdef, float fov)
+{
+    refdef->fov_x = fov;
+
+    /*
+     * Calculate screen aspect based on the passed in refdef.vrect
+     *
+     * Once aspect is wide enough, we can start to see top and bottom of the view getting clipped
+     * off.  Anything more than a 640x432 (~1.5) aspect ratio and we fudge the fov by setting in the
+     * vertical direction and using the proportional horizontal fov to match.
+     */
+    float screen_aspect = (float)refdef->vrect.width / (float)refdef->vrect.height;
+
+    if (screen_aspect < 640.0f / 432.0f) {
+        refdef->fov_y = SCR_CalcFovY(refdef->fov_x, refdef->vrect.width, refdef->vrect.height);
+    } else {
+        refdef->fov_y = SCR_CalcFovY(refdef->fov_x, 640, 432);
+        refdef->fov_x = SCR_CalcFovX(refdef->fov_y, refdef->vrect.width, refdef->vrect.height);
+    }
 }
 
 
@@ -642,7 +683,7 @@ Internal use only
 =================
 */
 static void
-SCR_CalcRefdef(void)
+SCR_CalcRefdef()
 {
     vrect_t vrect;
     float size;
@@ -680,6 +721,9 @@ SCR_CalcRefdef(void)
     else
 	sb_lines = 24 + 16 + 8;
 
+    /* Remove tile fill along side status bar when view is >= 100% */
+    sb_lines_hidden = scr_viewsize.value < 100.0f ? sb_lines : 0;
+
 // these calculations mirror those in R_Init() for r_refdef, but take no
 // account of water warping
     vrect.x = 0;
@@ -687,11 +731,10 @@ SCR_CalcRefdef(void)
     vrect.width = vid.width;
     vrect.height = vid.height;
 
-    R_SetVrect(&vrect, &scr_vrect, sb_lines);
-    R_ViewChanged(&vrect, sb_lines, vid.aspect);
-
-    r_refdef.fov_x = scr_fov.value;
-    r_refdef.fov_y = CalcFov(r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
+    R_SetVrect(&vrect, &scr_vrect, sb_lines_hidden);
+    R_SetVrect(&vrect, &r_refdef.vrect, sb_lines_hidden);
+    SCR_CalcFOV(&r_refdef, scr_fov.value);
+    R_ViewChanged(&vrect, sb_lines_hidden, vid.aspect);
 
 // guard against going from one mode to another that's less than half the
 // vertical resolution
@@ -1192,7 +1235,7 @@ SCR_EndLoadingPlaque(void)
 static void
 SCR_TileClear(void)
 {
-    int scaled_sb_lines = (int)(sb_lines * scr_scale);
+    int scaled_sb_lines = SCR_Scale(sb_lines_hidden);
 
     if (r_refdef.vrect.x > 0) {
 	// left
@@ -1211,8 +1254,7 @@ SCR_TileClear(void)
 	Draw_TileClear(r_refdef.vrect.x,
 		       r_refdef.vrect.y + r_refdef.vrect.height,
 		       r_refdef.vrect.width,
-		       vid.height - scaled_sb_lines -
-		       (r_refdef.vrect.height + r_refdef.vrect.y));
+		       vid.height - scaled_sb_lines - (r_refdef.vrect.height + r_refdef.vrect.y));
     }
 }
 #endif
@@ -1404,7 +1446,7 @@ SCR_UpdateScreen(void)
 	vrect.x = 0;
 	vrect.y = 0;
 	vrect.width = vid.width;
-	vrect.height = vid.height - sb_lines;
+	vrect.height = vid.height - SCR_Scale(sb_lines_hidden);
         vrect.pnext = NULL;
 	VID_Update(&vrect);
     } else {
@@ -1454,6 +1496,7 @@ SCR_RegisterVariables()
     Cvar_RegisterVariable(&scr_viewsize);
     Cvar_RegisterVariable(&scr_conspeed);
     Cvar_RegisterVariable(&scr_hudscale);
+    Cvar_RegisterVariable(&scr_sbaralpha);
     Cvar_RegisterVariable(&scr_showram);
     Cvar_RegisterVariable(&scr_showturtle);
     Cvar_RegisterVariable(&scr_showpause);

@@ -18,32 +18,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-#ifndef SBAR_H
-#define SBAR_H
+#include "cdaudio_driver.h"
 
-// the status bar is only redrawn if something has changed, but if anything
-// does, the entire thing will be redrawn for the next vid.numpages frames.
-
-#define	SBAR_HEIGHT		24
-
-extern int sb_lines;         // scan lines to draw
-extern int sb_lines_hidden;  // scan lines obscured totally by the status bar
-
-void Sbar_AddCommands();
-void Sbar_Init();
-
-void Sbar_Changed(void);
-
-// call whenever any of the client stats represented on the sbar changes
-
-void Sbar_Draw(void);
-
-// called every frame by screen
-
-void Sbar_IntermissionOverlay(void);
-
-// called each frame after the level has been completed
-
-void Sbar_FinaleOverlay(void);
-
-#endif /* SBAR_H */
+int CDDrv_IsAudioTrack(byte track) { return 0; }
+int CDDrv_PlayTrack(byte track) { return 1; }
+int CDDrv_IsPlaying(byte track) { return 0; }
+int CDDrv_InitDevice(void) { return -1; }
+void CDDrv_CloseDevice(void) { }
+void CDDrv_Eject(void) { }
+void CDDrv_CloseDoor(void) { }
+void CDDrv_Stop(void) { }
+void CDDrv_Pause(void) { }
+void CDDrv_Resume(byte track) { }
+int CDDrv_GetMaxTrack(byte *track) { return 0; }
+int CDDrv_SetVolume(byte volume) { return -1; }

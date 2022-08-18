@@ -522,6 +522,8 @@ Mod_ClearAll(void)
     for (brushmodel_t *brushmodel = loaded_brushmodels; brushmodel; brushmodel = brushmodel->next) {
         GL_DisownTextures(&brushmodel->model);
     }
+    GL_FreeBmodelVertexBuffers();
+
     for (model_t *sprite = loaded_sprites; sprite; sprite = sprite->next) {
         GL_DisownTextures(sprite);
     }
@@ -718,7 +720,7 @@ GL_LoadBrushModelTexture(const model_t *model, texture_t *texture)
         pic.height = texture->height; // Possibly modified by picmip in previous upload
         texture->gl_texturenum_fullbright = GL_LoadTexture8(model, va("%s:fullbright", texture->name), &pic, type);
     } else {
-        texture->gl_texturenum_fullbright = 0;
+        texture->gl_texturenum_fullbright = invalid_texture_id;
     }
 }
 
@@ -2130,7 +2132,7 @@ Mod_Extradata
 Caches the data if needed
 ===============
 */
-void *
+aliashdr_t *
 Mod_Extradata(model_t *model)
 {
     void *buffer;
@@ -2197,12 +2199,14 @@ Mod_ReloadTextures()
     const model_t *model;
     brushmodel_t *brushmodel;
 
-    /* Alias models */
+    /* Alias models (textures and vertex buffers) */
     for (model = Mod_AliasCache(); model; model = model->next) {
         GL_LoadAliasSkinTextures(model, NULL);
+        GL_UploadAliasMeshData(Cache_Check(&model->cache));
     }
     for (model = Mod_AliasOverflow(); model; model = model->next) {
         GL_LoadAliasSkinTextures(model, NULL);
+        GL_UploadAliasMeshData(Cache_Check(&model->cache));
     }
 
     /* Sprites */
@@ -2211,11 +2215,17 @@ Mod_ReloadTextures()
     }
 
     /* Brush models */
-    for (brushmodel = loaded_brushmodels; brushmodel; brushmodel = brushmodel->next) {
-        if (brushmodel->parent)
-            continue;
-        GL_LoadBrushModelTextures(brushmodel);
-        GL_ReloadLightmapTextures(&brushmodel->model, GLBrushModel(brushmodel)->resources);
+    brushmodel = loaded_brushmodels;
+    if (brushmodel) {
+        glbrushmodel_resource_t *resources = GLBrushModel(brushmodel)->resources;
+        for (int i = 0; i < resources->numblocks; i++)
+            resources->blocks[i].texture = invalid_texture_id;
+        for (brushmodel = loaded_brushmodels; brushmodel; brushmodel = brushmodel->next) {
+            if (brushmodel->parent)
+                continue;
+            GL_LoadBrushModelTextures(brushmodel);
+            GL_UploadLightmaps(&brushmodel->model, GLBrushModel(brushmodel)->resources);
+        }
     }
 }
 #endif

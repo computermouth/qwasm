@@ -27,12 +27,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_local.h"
 #include "r_shared.h"
+#include "sbar.h"
 #include "screen.h"
 #include "sound.h"
 #include "sys.h"
 #include "view.h"
 
-int r_maphunkmark;
+static int r_maphighhunkmark;
 
 void *colormap;
 float r_time1;
@@ -296,7 +297,9 @@ R_PatchEdgeSortingCode()
 static void
 R_HunkAllocSurfaces()
 {
-    auxsurfaces = Hunk_AllocName(r_numsurfaces * sizeof(surf_t), "surfaces");
+    auxsurfaces = Hunk_HighAllocName(CACHE_PAD_ARRAY(r_numsurfaces, surf_t) * sizeof(surf_t), "surfaces");
+    auxsurfaces = CACHE_ALIGN_PTR(auxsurfaces);
+
     surfaces = auxsurfaces;
     surf_max = &surfaces[r_numsurfaces];
     surfaces--;
@@ -307,7 +310,8 @@ R_HunkAllocSurfaces()
 static void
 R_HunkAllocEdges()
 {
-    auxedges = Hunk_AllocName(r_numedges * sizeof(edge_t), "edges");
+    auxedges = Hunk_HighAllocName(CACHE_PAD_ARRAY(r_numedges, edge_t) * sizeof(edge_t), "edges");
+    auxedges = CACHE_ALIGN_PTR(auxedges);
 }
 
 /*
@@ -343,19 +347,28 @@ R_NewMap(void)
 
     Alpha_NewMap();
 
-    r_maphunkmark = Hunk_LowMark();
+    Hunk_FreeToHighMark(r_maphighhunkmark);
+    R_AllocSurfEdges(false);
+}
+
+void
+R_AllocSurfEdges(qboolean nostack)
+{
+    r_maphighhunkmark = Hunk_HighMark();
 
     auxsurfaces = NULL;
-    if (r_numsurfaces > MAXSTACKSURFACES)
+    if (r_numsurfaces > MAXSTACKSURFACES || nostack)
         R_HunkAllocSurfaces();
 
     auxedges = NULL;
-    if (r_numedges > MAXSTACKEDGES)
+    if (r_numedges > MAXSTACKEDGES || nostack)
         R_HunkAllocEdges();
 
     /* extra space for saving surfs/edges for translucent surface rendering */
-    savesurfs = Hunk_AllocName(r_numsurfaces * sizeof(surf_t), "savesurf");
-    saveedges = Hunk_AllocName(r_numedges * sizeof(edge_t), "saveedge");
+    savesurfs = Hunk_HighAllocName(CACHE_PAD_ARRAY(r_numsurfaces, surf_t) * sizeof(surf_t), "savesurf");
+    savesurfs = CACHE_ALIGN_PTR(savesurfs);
+    saveedges = Hunk_HighAllocName(CACHE_PAD_ARRAY(r_numedges, edge_t) * sizeof(edge_t), "saveedge");
+    saveedges = CACHE_ALIGN_PTR(saveedges);
 }
 
 
@@ -372,16 +385,11 @@ R_SetVrect(const vrect_t *in, vrect_t *out, int lineadj)
     qboolean full;
 
     if (scr_scale != 1.0f) {
-        lineadj = (int)(lineadj * scr_scale);
+        lineadj = SCR_Scale(lineadj);
     }
 
-#ifdef NQ_HACK
-    full = (scr_viewsize.value >= 120.0f);
-#endif
-#ifdef QW_HACK
-    full = (!cl_sbar.value && scr_viewsize.value >= 100.0f);
-#endif
-    size = qmin(scr_viewsize.value, 100.0f);
+    full = (scr_viewsize.value >= 100.0f);
+    size = qmin(scr_viewsize.value + 10.0f, 100.0f);  // 90 is full width but sbar height filled
 
     /* Hide the status bar during intermission */
     if (cl.intermission) {
@@ -437,27 +445,27 @@ R_ViewChanged(const vrect_t *vrect, int lineadj, float aspect)
 
     R_SetVrect(vrect, &r_refdef.vrect, lineadj);
 
-    r_refdef.horizontalFieldOfView = 2.0 * tan(r_refdef.fov_x / 360 * M_PI);
-    r_refdef.fvrectx = (float)r_refdef.vrect.x;
-    r_refdef.fvrectx_adj = (float)r_refdef.vrect.x - 0.5;
-    r_refdef.vrect_x_adj_shift20 = (r_refdef.vrect.x << 20) + (1 << 19) - 1;
-    r_refdef.fvrecty = (float)r_refdef.vrect.y;
-    r_refdef.fvrecty_adj = (float)r_refdef.vrect.y - 0.5;
-    r_refdef.vrectright = r_refdef.vrect.x + r_refdef.vrect.width;
+    r_refdef.horizontalFieldOfView  = 2.0 * tan(r_refdef.fov_x / 360 * M_PI);
+    r_refdef.fvrectx                = (float)r_refdef.vrect.x;
+    r_refdef.fvrectx_adj            = (float)r_refdef.vrect.x - 0.5;
+    r_refdef.vrect_x_adj_shift20    = (r_refdef.vrect.x << 20) + (1 << 19) - 1;
+    r_refdef.fvrecty                = (float)r_refdef.vrect.y;
+    r_refdef.fvrecty_adj            = (float)r_refdef.vrect.y - 0.5;
+    r_refdef.vrectright             = r_refdef.vrect.x + r_refdef.vrect.width;
     r_refdef.vrectright_adj_shift20 = (r_refdef.vrectright << 20) + (1 << 19) - 1;
-    r_refdef.fvrectright = (float)r_refdef.vrectright;
-    r_refdef.fvrectright_adj = (float)r_refdef.vrectright - 0.5;
-    r_refdef.vrectrightedge = (float)r_refdef.vrectright - 0.99;
-    r_refdef.vrectbottom = r_refdef.vrect.y + r_refdef.vrect.height;
-    r_refdef.fvrectbottom = (float)r_refdef.vrectbottom;
-    r_refdef.fvrectbottom_adj = (float)r_refdef.vrectbottom - 0.5;
+    r_refdef.fvrectright            = (float)r_refdef.vrectright;
+    r_refdef.fvrectright_adj        = (float)r_refdef.vrectright - 0.5;
+    r_refdef.vrectrightedge         = (float)r_refdef.vrectright - 0.99;
+    r_refdef.vrectbottom            = r_refdef.vrect.y + r_refdef.vrect.height;
+    r_refdef.fvrectbottom           = (float)r_refdef.vrectbottom;
+    r_refdef.fvrectbottom_adj       = (float)r_refdef.vrectbottom - 0.5;
 
-    r_refdef.aliasvrect.x = (int)(r_refdef.vrect.x * r_aliasuvscale);
-    r_refdef.aliasvrect.y = (int)(r_refdef.vrect.y * r_aliasuvscale);
-    r_refdef.aliasvrect.width = (int)(r_refdef.vrect.width * r_aliasuvscale);
-    r_refdef.aliasvrect.height = (int)(r_refdef.vrect.height * r_aliasuvscale);
-    r_refdef.aliasvrectright = r_refdef.aliasvrect.x + r_refdef.aliasvrect.width;
-    r_refdef.aliasvrectbottom = r_refdef.aliasvrect.y + r_refdef.aliasvrect.height;
+    r_refdef.aliasvrect.x           = (int)(r_refdef.vrect.x * r_aliasuvscale);
+    r_refdef.aliasvrect.y           = (int)(r_refdef.vrect.y * r_aliasuvscale);
+    r_refdef.aliasvrect.width       = (int)(r_refdef.vrect.width * r_aliasuvscale);
+    r_refdef.aliasvrect.height      = (int)(r_refdef.vrect.height * r_aliasuvscale);
+    r_refdef.aliasvrectright        = r_refdef.aliasvrect.x + r_refdef.aliasvrect.width;
+    r_refdef.aliasvrectbottom       = r_refdef.aliasvrect.y + r_refdef.aliasvrect.height;
 
     pixelAspect = aspect;
     xOrigin = r_refdef.xOrigin;
@@ -476,11 +484,9 @@ R_ViewChanged(const vrect_t *vrect, int lineadj, float aspect)
 // the polygon rasterization will never render in the first row or column
 // but will definately render in the [range] row and column, so adjust the
 // buffer origin to get an exact edge to edge fill
-    xcenter = ((float)r_refdef.vrect.width * XCENTERING) +
-	r_refdef.vrect.x - 0.5;
+    xcenter = ((float)r_refdef.vrect.width * XCENTERING) + r_refdef.vrect.x - 0.5;
     aliasxcenter = xcenter * r_aliasuvscale;
-    ycenter = ((float)r_refdef.vrect.height * YCENTERING) +
-	r_refdef.vrect.y - 0.5;
+    ycenter = ((float)r_refdef.vrect.height * YCENTERING) + r_refdef.vrect.y - 0.5;
     aliasycenter = ycenter * r_aliasuvscale;
 
     xscale = r_refdef.vrect.width / r_refdef.horizontalFieldOfView;
@@ -519,8 +525,7 @@ R_ViewChanged(const vrect_t *vrect, int lineadj, float aspect)
     for (i = 0; i < 4; i++)
 	VectorNormalize(screenedge[i].normal);
 
-    res_scale =	sqrtf((r_refdef.vrect.width * r_refdef.vrect.height) /
-		      (320.0 * 152.0)) * (2.0 / r_refdef.horizontalFieldOfView);
+    res_scale =	sqrtf((r_refdef.vrect.width * r_refdef.vrect.height) / (320.0 * 152.0)) * (2.0 / r_refdef.horizontalFieldOfView);
     r_aliastransition = r_aliastransbase.value * res_scale;
     r_resfudge = r_aliastransadj.value * res_scale;
 
@@ -896,7 +901,7 @@ R_DrawViewModel
 static void
 R_DrawViewModel(void)
 {
-    entity_t *entity;
+    entity_t *entity = &cl.viewent;
 
 #ifdef NQ_HACK
     if (!r_drawviewmodel.value)
@@ -907,17 +912,31 @@ R_DrawViewModel(void)
 	return;
 #endif
 
-    if (cl.stats[STAT_ITEMS] & IT_INVISIBILITY)
-	return;
-
     if (cl.stats[STAT_HEALTH] <= 0)
 	return;
-
-    entity = &cl.viewent;
     if (!entity->model)
 	return;
 
+    entity->alpha = (cl.stats[STAT_ITEMS] & IT_INVISIBILITY) ? 64 : 255;
+    if (r_drawviewmodel.value < 1.0f)
+        entity->alpha = qclamp((int)(((float)entity->alpha * r_drawviewmodel.value) + 0.5f), 0, 255);
+    if (entity->alpha < 1)
+        return;
+
+    /* If FOV is above 90, just draw the model with a 90 degree FOV */
+    if (scr_fov.value > 90) {
+        SCR_CalcFOV(&r_refdef, 90);
+        vrect_t rect = { 0, 0, vid.width, vid.height };
+        R_ViewChanged(&rect, sb_lines_hidden, vid.aspect);
+    }
+
     R_AliasDrawModel(entity);
+
+    if (scr_fov.value > 90.0f) {
+        SCR_CalcFOV(&r_refdef, scr_fov.value);
+        vrect_t rect = { 0, 0, vid.width, vid.height };
+        R_ViewChanged(&rect, sb_lines_hidden, vid.aspect);
+    }
 }
 
 
@@ -1157,21 +1176,10 @@ R_RenderView_(void)
         realloc = true;
     }
 
-    // Redo heap allocations it needed...
+    // Redo hunk allocations it needed...
     if (realloc) {
-        Hunk_FreeToLowMark(r_maphunkmark);
-
-        auxsurfaces = NULL;
-        if (r_numsurfaces > MAXSTACKSURFACES || nostack)
-            R_HunkAllocSurfaces();
-
-        auxedges = NULL;
-        if (r_numedges > MAXSTACKEDGES || nostack)
-            R_HunkAllocEdges();
-
-        /* surfs/edges for transparency */
-        savesurfs = Hunk_AllocName(r_numsurfaces * sizeof(surf_t), "savesurf");
-        saveedges = Hunk_AllocName(r_numedges * sizeof(edge_t), "saveedge");
+        Hunk_FreeToHighMark(r_maphighhunkmark);
+        R_AllocSurfEdges(nostack);
     }
 
     /* If we can fit edges/surfs on the stack, allocate them now */

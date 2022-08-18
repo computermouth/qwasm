@@ -103,38 +103,10 @@ endif
 # --------------------------------------------------------------------
 
 # USE_SDL -> shortcut to select all SDL targets
-ifeq ($(USE_SDL),Y)
-VID_TARGET ?= sdl
-IN_TARGET ?= sdl
-SND_TARGET ?= sdl
-endif
-
-ifeq ($(TARGET_OS),UNIX)
-EXT =
-ifeq ($(TARGET_UNIX),darwin)
 VID_TARGET ?= sdl
 IN_TARGET ?= sdl
 SND_TARGET ?= sdl
 CD_TARGET ?= null
-SNAPSHOT_TARGET = $(DIST_DIR)/tyrquake-$(TYR_VERSION_NUM)-osx.dmg
-else
-# All other unix can default to X11
-VID_TARGET ?= x11
-IN_TARGET ?= x11
-endif
-ifeq ($(TARGET_UNIX),bsd)
-CD_TARGET ?= bsd
-SND_TARGET ?= oss
-endif
-ifeq ($(TARGET_UNIX),openbsd)
-CD_TARGET ?= bsd
-SND_TARGET ?= sndio
-endif
-ifeq ($(TARGET_UNIX),linux)
-CD_TARGET ?= linux
-SND_TARGET ?= pulseaudio
-endif
-endif
 
 ifneq (,$(findstring $(TARGET_OS),WIN32 WIN64))
 EXT = .exe

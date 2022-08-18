@@ -38,8 +38,19 @@ cvar_t in_snd_block = { "in_snd_block", "0" };
 
 static qboolean mouse_available;
 static int mouse_x, mouse_y;
+static qboolean have_focus;
 
-static int have_focus = 0;
+void
+IN_SetFocus(qboolean focus)
+{
+    have_focus = focus;
+}
+
+qboolean
+IN_HaveFocus()
+{
+    return have_focus;
+}
 
 static void
 IN_CenterMouse()
@@ -619,10 +630,10 @@ IN_MouseMove(usercmd_t *cmd)
 
     if (((in_mlook.state & 1) ^ (int)m_freelook.value) && !(in_strafe.state & 1)) {
 	cl.viewangles[PITCH] += m_pitch.value * mouse_y;
-	if (cl.viewangles[PITCH] > 80)
-	    cl.viewangles[PITCH] = 80;
-	if (cl.viewangles[PITCH] < -70)
-	    cl.viewangles[PITCH] = -70;
+	if (cl.viewangles[PITCH] > cl_maxpitch.value)
+	    cl.viewangles[PITCH] = cl_maxpitch.value;
+	if (cl.viewangles[PITCH] < cl_minpitch.value)
+	    cl.viewangles[PITCH] = cl_minpitch.value;
     } else {
 	if ((in_strafe.state & 1) && noclip_anglehack)
 	    cmd->upmove -= m_forward.value * mouse_y;

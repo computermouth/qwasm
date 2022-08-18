@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "qtypes.h"
 #include "cvar.h"
+#include "render.h"
 #include "vid.h"
 
 // screen.h
@@ -38,6 +39,7 @@ void SCR_CenterPrint(const char *str);
 void SCR_BeginLoadingPlaque(void);
 void SCR_EndLoadingPlaque(void);
 int SCR_ModalMessage(const char *text);
+void SCR_CalcFOV(refdef_t *refdef, float fov);
 
 extern float scr_con_current;
 extern float scr_centertime_off;
@@ -48,6 +50,7 @@ extern qboolean scr_skipupdate;
 extern qboolean scr_block_drawing;
 extern cvar_t scr_viewsize;
 extern cvar_t scr_fov;
+extern cvar_t scr_sbaralpha;
 extern vrect_t scr_vrect;
 
 // only the refresh window will be updated unless these variables are flagged
@@ -58,5 +61,8 @@ extern float scr_scale; /* hud scaling factor */
 extern int scr_scaled_width;
 extern int scr_scaled_height;
 extern float scr_conbackscale; /* The scaling applied to the console background */
+
+static inline int SCR_Scale(int pixels)     { return (int)((float)pixels * scr_scale); }
+static inline int SCR_ScaleCoord(int coord) { return (int)((float)coord  / scr_scale + 0.5f); }
 
 #endif /* SCREEN_H */

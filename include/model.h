@@ -50,6 +50,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bothdefs.h"
 #endif
 
+#ifdef GLQUAKE
+/* Embed in struct for stricter type checking of texture id usage */
+typedef struct texture_id { uint32_t id; } texture_id_t;
+#define invalid_texture_id ((texture_id_t){0})
+static inline qboolean TextureIsValid(texture_id_t texture) { return texture.id != 0; }
+static inline qboolean TexturesAreSame(texture_id_t t1, texture_id_t t2) { return t1.id == t2.id; }
+#endif
+
 typedef enum {
     depthchain_head,
     depthchain_alias,
@@ -107,12 +115,12 @@ typedef struct texture_s {
     unsigned width, height;
 #ifdef GLQUAKE
     int mark;
-    GLuint gl_texturenum;
+    texture_id_t gl_texturenum;
     union {
-        GLuint gl_texturenum_alpha;	 // for sky texture
-        GLuint gl_texturenum_fullbright; // mask texture for fullbrights
+        texture_id_t gl_texturenum_alpha;      // for sky texture
+        texture_id_t gl_texturenum_fullbright; // mask texture for fullbrights
         struct {
-            GLuint gl_warpimage;
+            texture_id_t gl_warpimage;
             int gl_warpimagesize;
         };
     };
@@ -177,13 +185,16 @@ typedef struct msurface_s {
     int numedges;	// are backwards edges
 
 #ifdef GLQUAKE
+    // TODO: optimise data type sizes here
     int light_s;	// gl lightmap coordinates
     int light_t;
     int lightmapblock;
     int material;
+    int buffer_offset;
+
     int cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
     qboolean cached_dlight;     // true if dynamic light in cache
-    glpoly_t *poly;
+
     struct msurface_s *chain;   // Material chain for drawing
     depthchain_t depthchain;    // Depth chain for translucent surface sorting
 #else
@@ -394,7 +405,17 @@ typedef struct {
     int indices;             // Offset to indices for drawing
     int texcoords;           // Offset to texcoords
     int textures;            // Offset to GLuint texture handles
-    aliashdr_t ahdr;
+    int numtextures;         // Total number of textures (including skingroups)
+    int lightnormalindex;    // Offset to lightnormalindex data
+    union {
+        GLuint all[3];
+        struct {
+            GLuint index;
+            GLuint texcoord;
+            GLuint vertex;
+        };
+    } buffers;
+    aliashdr_t ahdr; // Must be last, alias model data follows directly.
 } gl_aliashdr_t;
 
 static inline gl_aliashdr_t *
@@ -588,7 +609,7 @@ const model_t *Mod_AliasOverflow(void);
 #endif
 void Mod_ClearAll(void);
 model_t *Mod_ForName(const char *name, qboolean crash);
-void *Mod_Extradata(model_t *model);	// handles caching
+aliashdr_t *Mod_Extradata(model_t *model);	// handles caching
 void Mod_TouchModel(const char *name);
 void Mod_Print(void);
 

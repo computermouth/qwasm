@@ -83,17 +83,17 @@ qsnprintf(char *str, size_t size, const char *format, ...)
     return written;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
 char *
 qstrncpy(char *dest, const char *src, size_t size)
 {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstringop-truncation"
     strncpy(dest, src, size - 1);
-#pragma GCC diagnostic pop
     dest[size - 1] = 0;
 
     return dest;
 }
+#pragma GCC diagnostic pop
 
 // ======================================================================
 
@@ -1371,16 +1371,10 @@ void
 COM_WriteFile(const char *filename, const void *data, int len)
 {
     FILE *f;
-    char name[MAX_OSPATH];
 
-    qsnprintf(name, sizeof(name), "%s/%s", com_gamedir, filename);
-
-    f = fopen(name, "wb");
+    f = COM_FOpenFileCreate(filename, "wb");
     if (!f) {
-	Sys_mkdir(com_gamedir);
-	f = fopen(name, "wb");
-	if (!f)
-	    Sys_Error("Error opening %s", filename);
+        Sys_Error("Error opening %s", filename);
     }
     fwrite(data, 1, len, f);
     fclose(f);
@@ -1393,21 +1387,21 @@ COM_CreatePath
 ============
 */
 void
-COM_CreatePath(const char *path)
+COM_CreatePath(const char *relative_path)
 {
-    char part[MAX_OSPATH];
-    char *ofs;
-
-    if (!path || !path[0])
+    if (!relative_path || !relative_path[0])
 	return;
 
-    strncpy(part, path, sizeof(part));
-    part[MAX_OSPATH - 1] = 0;
+    char path[MAX_OSPATH];
+    qstrncpy(path, va("%s/%s", com_gamedir, relative_path), sizeof(path));
 
-    for (ofs = part + 1; *ofs; ofs++) {
+    for (char *ofs = path + 1; *ofs; ofs++) {
 	if (*ofs == '/') {	// create the directory
 	    *ofs = 0;
-	    Sys_mkdir(part);
+
+            Sys_Printf("%s: creating '%s'\n", __func__, path);
+
+	    Sys_mkdir(path);
 	    *ofs = '/';
 	}
     }
@@ -1464,6 +1458,15 @@ COM_FOpenFile(const char *filename, FILE **file)
     *file = NULL;
 
     return -1;
+}
+
+FILE *
+COM_FOpenFileCreate(const char *path, const char *mode)
+{
+    Sys_Printf("%s: path is '%s'\n", __func__, path);
+
+    COM_CreatePath(path);
+    return fopen(va("%s/%s", com_gamedir, path), mode);
 }
 
 /**
@@ -1936,7 +1939,7 @@ COM_RestoreGameDirectoryState()
     hipnotic        = saved_game_directory_state.hipnotic;
     rogue           = saved_game_directory_state.rogue;
     com_modified    = saved_game_directory_state.com_modified;
-    com_game_type   = hipnotic = saved_game_directory_state.com_game_type;
+    com_game_type   = saved_game_directory_state.com_game_type;
     hipnotic        = saved_game_directory_state.hipnotic;
     com_searchpaths = saved_game_directory_state.com_searchpaths;
     qstrncpy(com_gamedir, saved_game_directory_state.com_gamedir, sizeof(com_gamedir));

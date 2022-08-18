@@ -45,7 +45,6 @@ vec3_t r_plightvec;
 int r_ambientlight;
 float r_shadelight;
 static float ziscale;
-static model_t *pmodel;
 
 static vec3_t alias_forward, alias_right, alias_up;
 
@@ -66,7 +65,7 @@ typedef struct {
 cvar_t r_lerpmodels = { "r_lerpmodels", "1" };
 cvar_t r_lerpmove = { "r_lerpmove", "1" };
 
-static aedge_t aedges[12] = {
+static const aedge_t aedges[12] = {
     {0, 1}, {1, 2}, {2, 3}, {3, 0},
     {4, 5}, {5, 6}, {6, 7}, {7, 4},
     {0, 5}, {1, 4}, {2, 7}, {3, 6}
@@ -78,10 +77,9 @@ float r_avertexnormals[NUMVERTEXNORMALS][3] = {
 #include "anorms.h"
 };
 
-static void R_AliasSetUpTransform(entity_t *e, aliashdr_t *pahdr, lerpdata_t *lerpdata, int trivial_accept);
+static void R_AliasSetUpTransform(entity_t *e, aliashdr_t *pahdr, lerpdata_t *lerpdata);
 static void R_AliasTransformVector(const vec3_t in, vec3_t out);
-static void R_AliasTransformFinalVert(finalvert_t *fv, auxvert_t *av,
-				      trivertx_t *pverts, stvert_t *pstverts);
+static void R_AliasTransformFinalVert(finalvert_t *fv, auxvert_t *av, trivertx_t *pverts, stvert_t *pstverts);
 
 void R_AliasTransformAndProjectFinalVerts(finalvert_t *fv, stvert_t *pstverts);
 void R_AliasProjectFinalVert(finalvert_t *fv, auxvert_t *av);
@@ -171,57 +169,72 @@ R_AliasModelLoader(void)
 }
 
 /*
+ * Fill out the mins/maxs of the bbox.  When lerping, sometimes we
+ * lerp between poses that are in two different frames, so in those
+ * cases the bbox needs to be expanded to enclose both frames.
+ */
+static void
+R_AliasGetBBox(const entity_t *entity, const aliashdr_t *aliashdr, vec3_t mins, vec3_t maxs)
+{
+    if (!r_lerpmodels.value || entity->lerp.frame.previous == entity->lerp.frame.current) {
+        /* Trivial no interpolation case, just promoting to floats */
+        const maliasframedesc_t *frame = &aliashdr->frames[entity->frame];
+        for (int i = 0; i < 3; i++) {
+            mins[i] = frame->bboxmin.v[i];
+            maxs[i] = frame->bboxmax.v[i];
+        }
+    } else {
+        /* Interpolated frames, expand the bbox to enclose both frames */
+        const maliasframedesc_t *frame0 = &aliashdr->frames[entity->lerp.frame.previous];
+        const maliasframedesc_t *frame1 = &aliashdr->frames[entity->lerp.frame.current];
+        for (int i = 0; i < 3; i++) {
+            mins[i] = qmin(frame0->bboxmin.v[i], frame1->bboxmin.v[i]);
+            maxs[i] = qmax(frame0->bboxmax.v[i], frame1->bboxmax.v[i]);
+        }
+    }
+}
+
+/*
 ================
 R_AliasCheckBBox
 
-FIXME: does not account for animation frame lerping.
-FIXME: switch over to radius-based culling like glquake?
+TODO: switch over to radius-based culling like glquake?
 ================
 */
 static qboolean
-R_AliasCheckBBox(entity_t *entity, aliashdr_t *aliashdr)
+R_AliasCheckBBox(entity_t *entity, const aliashdr_t *aliashdr)
 {
-    int i, flags, frame, numv;
-    float zi, basepts[8][3], v0, v1, frac;
+    int flags, numv;
+    vec3_t mins, maxs, basepts[8];
+    float zi, v0, v1, frac;
     finalvert_t *pv0, *pv1, viewpts[16];
     auxvert_t *pa0, *pa1, viewaux[16];
-    maliasframedesc_t *pframedesc;
     qboolean zclipped, zfullyclipped;
     unsigned anyclip, allclip;
     int minz;
 
+    R_AliasGetBBox(entity, aliashdr, mins, maxs);
+
 // expand, rotate, and translate points into worldspace
 
-    entity->trivial_accept = 0;
-    pmodel = entity->model;
-
-// construct the base bounding box for this frame
-    frame = entity->frame;
-// TODO: don't repeat this check when drawing?
-    if ((frame >= aliashdr->numframes) || (frame < 0)) {
-	Con_DPrintf("No such frame %d %s\n", frame, pmodel->name);
-	frame = 0;
-    }
-
-    pframedesc = &aliashdr->frames[frame];
-
 // x worldspace coordinates
-    basepts[0][0] = basepts[1][0] = basepts[2][0] = basepts[3][0] = (float)pframedesc->bboxmin.v[0];
-    basepts[4][0] = basepts[5][0] = basepts[6][0] = basepts[7][0] = (float)pframedesc->bboxmax.v[0];
+    basepts[0][0] = basepts[1][0] = basepts[2][0] = basepts[3][0] = mins[0];
+    basepts[4][0] = basepts[5][0] = basepts[6][0] = basepts[7][0] = maxs[0];
 
 // y worldspace coordinates
-    basepts[0][1] = basepts[3][1] = basepts[5][1] = basepts[6][1] = (float)pframedesc->bboxmin.v[1];
-    basepts[1][1] = basepts[2][1] = basepts[4][1] = basepts[7][1] = (float)pframedesc->bboxmax.v[1];
+    basepts[0][1] = basepts[3][1] = basepts[5][1] = basepts[6][1] = mins[1];
+    basepts[1][1] = basepts[2][1] = basepts[4][1] = basepts[7][1] = maxs[1];
 
 // z worldspace coordinates
-    basepts[0][2] = basepts[1][2] = basepts[4][2] = basepts[5][2] = (float)pframedesc->bboxmin.v[2];
-    basepts[2][2] = basepts[3][2] = basepts[6][2] = basepts[7][2] = (float)pframedesc->bboxmax.v[2];
+    basepts[0][2] = basepts[1][2] = basepts[4][2] = basepts[5][2] = mins[2];
+    basepts[2][2] = basepts[3][2] = basepts[6][2] = basepts[7][2] = maxs[2];
 
     zclipped = false;
     zfullyclipped = true;
+    entity->trivial_accept = 0;
 
     minz = 9999;
-    for (i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; i++) {
 	R_AliasTransformVector(&basepts[i][0], &viewaux[i].fv[0]);
 
 	if (viewaux[i].fv[2] < ALIAS_Z_CLIP_PLANE) {
@@ -244,9 +257,8 @@ R_AliasCheckBBox(entity_t *entity, aliashdr_t *aliashdr)
     numv = 8;
 
     if (zclipped) {
-	// organize points by edges, use edges to get new points (possible trivial
-	// reject)
-	for (i = 0; i < 12; i++) {
+	// organize points by edges, use edges to get new points (possible trivial reject)
+	for (int i = 0; i < 12; i++) {
 	    // edge endpoints
 	    pv0 = &viewpts[aedges[i].index0];
 	    pv1 = &viewpts[aedges[i].index1];
@@ -255,12 +267,9 @@ R_AliasCheckBBox(entity_t *entity, aliashdr_t *aliashdr)
 
 	    // if one end is clipped and the other isn't, make a new point
 	    if (pv0->flags ^ pv1->flags) {
-		frac = (ALIAS_Z_CLIP_PLANE - pa0->fv[2]) /
-		    (pa1->fv[2] - pa0->fv[2]);
-		viewaux[numv].fv[0] = pa0->fv[0] +
-		    (pa1->fv[0] - pa0->fv[0]) * frac;
-		viewaux[numv].fv[1] = pa0->fv[1] +
-		    (pa1->fv[1] - pa0->fv[1]) * frac;
+		frac = (ALIAS_Z_CLIP_PLANE - pa0->fv[2]) / (pa1->fv[2] - pa0->fv[2]);
+		viewaux[numv].fv[0] = pa0->fv[0] + (pa1->fv[0] - pa0->fv[0]) * frac;
+		viewaux[numv].fv[1] = pa0->fv[1] + (pa1->fv[1] - pa0->fv[1]) * frac;
 		viewaux[numv].fv[2] = ALIAS_Z_CLIP_PLANE;
 		viewpts[numv].flags = 0;
 		numv++;
@@ -272,7 +281,7 @@ R_AliasCheckBBox(entity_t *entity, aliashdr_t *aliashdr)
     allclip = ALIAS_XY_CLIP_MASK;
 
 // TODO: probably should do this loop in ASM, especially if we use floats
-    for (i = 0; i < numv; i++) {
+    for (int i = 0; i < numv; i++) {
 	// we don't need to bother with vertices that were z-clipped
 	if (viewpts[i].flags & ALIAS_Z_CLIP)
 	    continue;
@@ -300,13 +309,6 @@ R_AliasCheckBBox(entity_t *entity, aliashdr_t *aliashdr)
 
     if (allclip)
 	return false;		// trivial reject off one side
-
-    /*
-     * FIXME - Trivial accept not safe while lerping unless we check
-     *         the bbox of both src and dst frames
-     */
-    if (r_lerpmodels.value)
-	return true;
 
     entity->trivial_accept = !anyclip & !zclipped;
     if (entity->trivial_accept) {
@@ -341,8 +343,7 @@ General clipped case
 ================
 */
 static void
-R_AliasPreparePoints(aliashdr_t *pahdr, finalvert_t *pfinalverts,
-		     auxvert_t *pauxverts)
+R_AliasPreparePoints(aliashdr_t *pahdr, finalvert_t *pfinalverts, auxvert_t *pauxverts)
 {
     int i;
     stvert_t *pstverts;
@@ -384,8 +385,7 @@ R_AliasPreparePoints(aliashdr_t *pahdr, finalvert_t *pfinalverts,
 	pfv[1] = &pfinalverts[ptri->vertindex[1]];
 	pfv[2] = &pfinalverts[ptri->vertindex[2]];
 
-	if (pfv[0]->flags & pfv[1]->flags & pfv[2]->
-	    flags & (ALIAS_XY_CLIP_MASK | ALIAS_Z_CLIP))
+	if (pfv[0]->flags & pfv[1]->flags & pfv[2]->flags & (ALIAS_XY_CLIP_MASK | ALIAS_Z_CLIP))
 	    continue;		// completely clipped
 
 	if (!((pfv[0]->flags | pfv[1]->flags | pfv[2]->flags) & (ALIAS_XY_CLIP_MASK | ALIAS_Z_CLIP))) {	// totally unclipped
@@ -405,7 +405,7 @@ R_AliasSetUpTransform
 ================
 */
 static void
-R_AliasSetUpTransform(entity_t *entity, aliashdr_t *aliashdr, lerpdata_t *lerpdata, int trivial_accept)
+R_AliasSetUpTransform(entity_t *entity, aliashdr_t *aliashdr, lerpdata_t *lerpdata)
 {
     int i;
     float rotationmatrix[3][4], t2matrix[3][4];
@@ -416,7 +416,6 @@ R_AliasSetUpTransform(entity_t *entity, aliashdr_t *aliashdr, lerpdata_t *lerpda
 // TODO: should use a look-up table
 // TODO: could cache lazily, stored in the entity
 
-    R_AliasSetupTransformLerp(entity, lerpdata);
     /* The software renderer has reversed pitch angles */
     lerpdata->angles[PITCH] = -lerpdata->angles[PITCH];
 
@@ -458,22 +457,6 @@ R_AliasSetUpTransform(entity_t *entity, aliashdr_t *aliashdr, lerpdata_t *lerpda
 //      viewmatrix[2][3] = 0;
 
     R_ConcatTransforms(viewmatrix, rotationmatrix, aliastransform);
-
-// do the scaling up of x and y to screen coordinates as part of the transform
-// for the unclipped case (it would mess up clipping in the clipped case).
-// Also scale down z, so 1/z is scaled 31 bits for free, and scale down x and y
-// correspondingly so the projected x and y come out right
-// FIXME: make this work for clipped case too?
-    if (trivial_accept) {
-	for (i = 0; i < 4; i++) {
-	    aliastransform[0][i] *= aliasxscale *
-		(1.0 / ((float)0x8000 * 0x10000));
-	    aliastransform[1][i] *= aliasyscale *
-		(1.0 / ((float)0x8000 * 0x10000));
-	    aliastransform[2][i] *= 1.0 / ((float)0x8000 * 0x10000);
-
-	}
-    }
 }
 
 
@@ -483,8 +466,7 @@ R_AliasTransformFinalVert
 ================
 */
 static void
-R_AliasTransformFinalVert(finalvert_t *fv, auxvert_t *av,
-			  trivertx_t *pverts, stvert_t *pstverts)
+R_AliasTransformFinalVert(finalvert_t *fv, auxvert_t *av, trivertx_t *pverts, stvert_t *pstverts)
 {
     int temp;
     float lightcos, *plightnormal;
@@ -611,8 +593,7 @@ R_AliasPrepareUnclippedPoints(aliashdr_t *pahdr, finalvert_t *pfinalverts)
         }
     }
     r_affinetridesc.pfinalverts = pfinalverts;
-    r_affinetridesc.ptriangles = (mtriangle_t *)((byte *)pahdr +
-						 SW_Aliashdr(pahdr)->triangles);
+    r_affinetridesc.ptriangles = (mtriangle_t *)((byte *)pahdr + SW_Aliashdr(pahdr)->triangles);
     r_affinetridesc.numtriangles = pahdr->numtris;
 
     D_PolysetDraw();
@@ -727,7 +708,6 @@ R_AliasSetupLighting(const entity_t *entity, const lerpdata_t *lerpdata)
     r_plightvec[1] = -DotProduct(lightvec, alias_right);
     r_plightvec[2] = DotProduct(lightvec, alias_up);
 }
-
 static trivertx_t *
 R_AliasBlendPoseVerts(const entity_t *entity, aliashdr_t *aliashdr, lerpdata_t *lerpdata)
 {
@@ -766,8 +746,6 @@ set r_apverts
 static void
 R_AliasSetupFrame(entity_t *entity, aliashdr_t *aliashdr, lerpdata_t *lerpdata)
 {
-    R_AliasSetupAnimationLerp(entity, aliashdr, lerpdata);
-
     if (r_lerpmodels.value) {
         r_apverts = R_AliasBlendPoseVerts(entity, aliashdr, lerpdata);
     } else {
@@ -820,9 +798,27 @@ R_AliasDrawModel(entity_t *entity)
     lerpdata_t lerpdata;
 
     aliashdr = Mod_Extradata(entity->model);
-    R_AliasSetUpTransform(entity, aliashdr, &lerpdata, entity->trivial_accept);
+
+    R_AliasSetupTransformLerp(entity, &lerpdata);
+    R_AliasSetupAnimationLerp(entity, aliashdr, &lerpdata);
+
+    R_AliasSetUpTransform(entity, aliashdr, &lerpdata);
+
     if (!R_AliasCheckBBox(entity, aliashdr))
         return;
+
+    // do the scaling up of x and y to screen coordinates as part of the transform
+    // for the unclipped case (it would mess up clipping in the clipped case).
+    // Also scale down z, so 1/z is scaled 31 bits for free, and scale down x and y
+    // correspondingly so the projected x and y come out right
+    // FIXME: make this work for clipped case too?
+    if (entity->trivial_accept) {
+	for (int i = 0; i < 4; i++) {
+	    aliastransform[0][i] *= aliasxscale * (1.0 / ((float)0x8000 * 0x10000));
+	    aliastransform[1][i] *= aliasyscale * (1.0 / ((float)0x8000 * 0x10000));
+	    aliastransform[2][i] *=                1.0 / ((float)0x8000 * 0x10000);
+	}
+    }
 
     if (entity->alpha == ENTALPHA_ZERO)
         return;
