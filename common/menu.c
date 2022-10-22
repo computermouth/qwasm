@@ -31,16 +31,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "vid.h"
 #include "view.h"
 
-#ifdef NQ_HACK
 #include "host.h"
 #include "net.h"
 #include "server.h"
 #include "sound.h"
-#endif
-
-#ifdef QW_HACK
-#include "sys.h"
-#endif
 
 void (*vid_menudrawfn)(void);
 void (*vid_menukeyfn)(knum_t keynum);
@@ -65,7 +59,6 @@ void M_Menu_Quit_f(void);
 static void M_Quit_Draw(void);
 static void M_Quit_Key(knum_t keynum);
 
-#ifdef NQ_HACK
 static void M_Menu_SinglePlayer_f(void);
 static void M_SinglePlayer_Draw(void);
 static void M_SinglePlayer_Key(knum_t keynum);
@@ -105,7 +98,6 @@ static void M_ServerList_Key(knum_t keynum);
 static void M_Menu_Help_f(void);
 static void M_Help_Draw(void);
 static void M_Help_Key(knum_t keynum);
-#endif /* NQ_HACK */
 
 /* play enter sound after drawing a frame, so caching won't disrupt */
 static qboolean m_entersound;
@@ -287,12 +279,7 @@ M_Menu_Main_f(void)
 static void
 M_Main_Draw(void)
 {
-#ifdef NQ_HACK
     static const int cursor_heights[] = { 32, 52, 72, 92, 112 };
-#endif
-#ifdef QW_HACK
-    static const int cursor_heights[] = { 72, 112 };
-#endif
     int flash;
     const qpic8_t *pic;
 
@@ -314,16 +301,9 @@ M_Main_Key(knum_t keynum)
 	key_dest = key_game;
 	m_state = m_none;
 	cls.demonum = m_save_demonum;
-#ifdef NQ_HACK
 	if (cls.demonum != -1 && !cls.demoplayback
 	    && cls.state <= ca_connected)
 	    CL_NextDemo();
-#endif
-#ifdef QW_HACK
-	if (cls.demonum != -1 && !cls.demoplayback
-	    && cls.state == ca_disconnected)
-	    CL_NextDemo();
-#endif
 	break;
 
     case K_DOWNARROW:
@@ -350,7 +330,6 @@ M_Main_Key(knum_t keynum)
 	    M_Menu_Quit_f();
 	    break;
 
-#ifdef NQ_HACK
 	case M_MAIN_CURSOR_SINGLEPLAYER:
 	    M_Menu_SinglePlayer_f();
 	    break;
@@ -362,7 +341,6 @@ M_Main_Key(knum_t keynum)
 	case M_MAIN_CURSOR_HELP:
 	    M_Menu_Help_f();
 	    break;
-#endif
 	default:
 	    break;
 	}
@@ -390,10 +368,6 @@ typedef enum {
     M_OPTIONS_CURSOR_MOUSELOOK,
     M_OPTIONS_CURSOR_LOOKSPRING,
     M_OPTIONS_CURSOR_LOOKSTRAFE,
-#ifdef QW_HACK
-    M_OPTIONS_CURSOR_SBAR,
-    M_OPTIONS_CURSOR_HUD,
-#endif
     M_OPTIONS_CURSOR_VIDEO,
     M_OPTIONS_CURSOR_MOUSEGRAB,
     M_OPTIONS_CURSOR_LINES,
@@ -457,14 +431,6 @@ M_AdjustSliders(int dir)
     case M_OPTIONS_CURSOR_LOOKSTRAFE:
 	Cvar_SetValue("lookstrafe", !lookstrafe.value);
 	break;
-#ifdef QW_HACK
-    case M_OPTIONS_CURSOR_SBAR:
-	Cvar_SetValue("cl_sbar", !cl_sbar.value);
-	break;
-    case M_OPTIONS_CURSOR_HUD:
-	Cvar_SetValue("cl_hudswap", !cl_hudswap.value);
-	break;
-#endif
     case M_OPTIONS_CURSOR_MOUSEGRAB:
 	Cvar_SetValue("_windowed_mouse", !_windowed_mouse.value);
 	break;
@@ -544,14 +510,6 @@ M_Options_Draw(void)
 
     M_Print(16, height += 8, "            Lookstrafe");
     M_DrawCheckbox(220, height, lookstrafe.value);
-
-#ifdef QW_HACK
-    M_Print(16, height += 8, "    Use old status bar");
-    M_DrawCheckbox(220, height, cl_sbar.value);
-
-    M_Print(16, height += 8, "      HUD on left side");
-    M_DrawCheckbox(220, height, cl_hudswap.value);
-#endif
 
     M_Print(16, height += 8, "         Video Options");
 
@@ -914,13 +872,7 @@ M_Quit_Key(knum_t keynum)
 
     case K_y:
 	key_dest = key_console;
-#ifdef NQ_HACK
 	Host_Quit_f();
-#endif
-#ifdef QW_HACK
-	CL_Disconnect();
-	Sys_Quit();
-#endif
 	break;
 
     default:
@@ -957,14 +909,12 @@ M_AddCommands()
     Cmd_AddCommand("menu_keys", M_Menu_Keys_f);
     Cmd_AddCommand("menu_video", M_Menu_Video_f);
     Cmd_AddCommand("menu_quit", M_Menu_Quit_f);
-#ifdef NQ_HACK
     Cmd_AddCommand("menu_singleplayer", M_Menu_SinglePlayer_f);
     Cmd_AddCommand("menu_load", M_Menu_Load_f);
     Cmd_AddCommand("menu_save", M_Menu_Save_f);
     Cmd_AddCommand("menu_multiplayer", M_Menu_MultiPlayer_f);
     Cmd_AddCommand("menu_setup", M_Menu_Setup_f);
     Cmd_AddCommand("help", M_Menu_Help_f);
-#endif
 }
 
 void
@@ -1015,7 +965,6 @@ M_Draw(void)
 	M_Quit_Draw();
 	break;
 
-#ifdef NQ_HACK
     case m_singleplayer:
 	M_SinglePlayer_Draw();
 	break;
@@ -1055,7 +1004,6 @@ M_Draw(void)
     case m_help:
 	M_Help_Draw();
 	break;
-#endif
 
     case m_none:
 	break;
@@ -1098,7 +1046,6 @@ M_Keydown(knum_t keynum)
 	M_Quit_Key(keynum);
 	return;
 
-#ifdef NQ_HACK
     case m_singleplayer:
 	M_SinglePlayer_Key(keynum);
 	return;
@@ -1138,12 +1085,10 @@ M_Keydown(knum_t keynum)
     case m_help:
 	M_Help_Key(keynum);
 	return;
-#endif
     }
 }
 
 /* All NQ menus below */
-#ifdef NQ_HACK
 
 //=============================================================================
 /* SINGLE PLAYER MENU */
@@ -1493,14 +1438,12 @@ static int setup_oldbottom;
 static int setup_top;
 static int setup_bottom;
 
-#ifdef NQ_HACK
 static void
 M_DrawTransPicTranslate(int x, int y, const qpic8_t *pic)
 {
     const byte *translation = R_GetTranslationTable(setup_top, setup_bottom);
     Draw_TransPicTranslate(x + ((scr_scaled_width - 320) >> 1), y, pic, translation);
 }
-#endif /* NQ_HACK */
 
 #define	NUM_SETUP_CMDS	5
 
@@ -2536,5 +2479,3 @@ M_ServerList_Key(knum_t keynum)
     }
 
 }
-
-#endif /* NQ_HACK */

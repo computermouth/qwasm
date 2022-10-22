@@ -121,11 +121,6 @@ cvar_t r_fullbright = {
     .flags = CVAR_DEVELOPER
 };
 
-#ifdef QW_HACK
-cvar_t r_netgraph = { "r_netgraph", "0" };
-static cvar_t r_zgraph = { "r_zgraph", "0" };
-#endif
-
 static cvar_t r_timegraph = { "r_timegraph", "0" };
 static cvar_t r_aliasstats = { "r_polymodelstats", "0" };
 static cvar_t r_dspeeds = { "r_dspeeds", "0" };
@@ -221,11 +216,6 @@ R_RegisterVariables()
     Cvar_RegisterVariable(&r_aliastransbase);
     Cvar_RegisterVariable(&r_aliastransadj);
 
-#ifdef QW_HACK
-    Cvar_RegisterVariable(&r_netgraph);
-    Cvar_RegisterVariable(&r_zgraph);
-#endif
-
     Cvar_RegisterVariable(&r_wateralpha);
     Cvar_RegisterVariable(&r_slimealpha);
     Cvar_RegisterVariable(&r_lavaalpha);
@@ -269,29 +259,11 @@ R_Init(void)
 static void
 R_PatchSurfaceBlockCode()
 {
-#ifdef USE_X86_ASM
-    if (r_pixbytes == 1) {
-	colormap = vid.colormap;
-	Sys_MakeCodeWriteable(R_Surf8Start, R_Surf8End);
-	R_Surf8Patch();
-        Sys_MakeCodeUnwriteable(R_Surf8Start, R_Surf8End);
-    } else {
-	colormap = vid.colormap16;
-	Sys_MakeCodeWriteable(R_Surf16Start, R_Surf16End);
-	R_Surf16Patch();
-	Sys_MakeCodeUnwriteable(R_Surf16Start, R_Surf16End);
-    }
-#endif
 }
 
 static void
 R_PatchEdgeSortingCode()
 {
-#ifdef USE_X86_ASM
-    Sys_MakeCodeWriteable(R_EdgeCodeStart, R_EdgeCodeEnd);
-    R_SurfacePatch();
-    Sys_MakeCodeUnwriteable(R_EdgeCodeStart, R_EdgeCodeEnd);
-#endif
 }
 
 static void
@@ -817,10 +789,8 @@ R_DrawEntitiesOnList(void)
 
     for (i = 0; i < cl_numvisedicts; i++) {
 	entity = cl_visedicts[i];
-#ifdef NQ_HACK
 	if (entity == &cl_entities[cl.viewentity])
 	    continue;		// don't draw the player
-#endif
 
         // Draw translucent entities separately
         if (entity->alpha != ENTALPHA_DEFAULT && entity->alpha != ENTALPHA_ONE)
@@ -863,10 +833,8 @@ R_DrawEntitiesOnList_Translucent(void)
 
     for (i = 0; i < cl_numvisedicts; i++) {
 	entity = cl_visedicts[i];
-#ifdef NQ_HACK
 	if (entity == &cl_entities[cl.viewentity])
 	    continue;		// don't draw the player
-#endif
 
         // Draw translucent entities only
         if (entity->alpha == ENTALPHA_DEFAULT || entity->alpha == ENTALPHA_ONE)
@@ -903,14 +871,8 @@ R_DrawViewModel(void)
 {
     entity_t *entity = &cl.viewent;
 
-#ifdef NQ_HACK
     if (!r_drawviewmodel.value)
 	return;
-#endif
-#ifdef QW_HACK
-    if (!r_drawviewmodel.value || !Cam_DrawViewModel())
-	return;
-#endif
 
     if (cl.stats[STAT_HEALTH] <= 0)
 	return;
@@ -1273,14 +1235,6 @@ R_RenderView_(void)
 
     if (r_timegraph.value)
 	R_TimeGraph();
-
-#ifdef QW_HACK
-    if (r_netgraph.value)
-	R_NetGraph();
-
-    if (r_zgraph.value)
-	R_ZGraph();
-#endif
 
     if (r_aliasstats.value)
 	R_PrintAliasStats();

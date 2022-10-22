@@ -32,18 +32,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "sys.h"
 #include "vid.h"
 
-#ifdef NQ_HACK
 #include "host.h"
-#endif
-#ifdef QW_HACK
-#include "quakedef.h"
-#endif
-
-#ifdef GLQUAKE
-#include "glquake.h"
-#else
 #include "r_local.h"
-#endif
 
 qvidmode_t *vid_modelist;
 qvidmode_t vid_windowed_mode;
@@ -311,7 +301,6 @@ VID_MenuDraw_(const vid_menustate_t *menu)
     }
     cursor++;
 
-#ifndef GLQUAKE
     if (menu->configure_window != CONFIGURE_WINDOW_MODE) {
         M_Print(16, cursor_heights[cursor], "        Resolution");
         if (menu->mode.resolution.scale) {
@@ -321,7 +310,6 @@ VID_MenuDraw_(const vid_menustate_t *menu)
             M_Print(184, cursor_heights[cursor], FormatDimensions(menu->mode.resolution.width, menu->mode.resolution.height));
         }
     }
-#endif
     cursor++;
 
     if (menu->configure_window != CONFIGURE_WINDOW_NONE) {
@@ -688,14 +676,12 @@ VID_Menu_ExitConfigureWindow(vid_menustate_t *menu, qboolean apply_changes)
         menu->cursor = VID_MENU_CURSOR_RESOLUTION;
     }
 
-#ifndef GLQUAKE
     /*
      * The software render needs width to be a multiple of 8
      * TODO: techincally, only the resolution width...
      */
     menu->mode.width &= ~7;
     menu->mode.resolution.width &= ~7;
-#endif
 
     menu->configure_window = CONFIGURE_WINDOW_NONE;
 }
@@ -775,10 +761,6 @@ VID_MenuKey_(vid_menustate_t *menu, knum_t keynum)
             menu->cursor = VID_MENU_CURSOR_WIDTH;
         else
 	    menu->cursor--;
-#ifdef GLQUAKE
-        if (menu->cursor == VID_MENU_CURSOR_RESOLUTION)
-            menu->cursor--;
-#endif
 	break;
     case K_DOWNARROW:
 	S_LocalSound("misc/menu1.wav");
@@ -790,10 +772,6 @@ VID_MenuKey_(vid_menustate_t *menu, knum_t keynum)
             menu->cursor = VID_MENU_CURSOR_WIDTH;
 	else
 	    menu->cursor++;
-#ifdef GLQUAKE
-        if (menu->cursor == VID_MENU_CURSOR_RESOLUTION)
-            menu->cursor++;
-#endif
 	break;
     case K_LEFTARROW:
 	S_LocalSound("misc/menu3.wav");

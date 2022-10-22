@@ -1,1 +1,5 @@
 remove all QW defines
+
+dynamic level loads in common/menu.c?
+
+remove CD stuff entirely

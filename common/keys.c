@@ -30,11 +30,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "sys.h"
 #include "zone.h"
 
-#ifdef _WIN32
-#include <windows.h>
-#include <winuser.h>
-#endif
-
 /* Key up events are sent even if in console mode */
 
 char key_lines[32][MAXCMDLINE];
@@ -348,11 +343,6 @@ Interactive line editing and console scrollback
 static void
 Key_Console(knum_t key)
 {
-#ifdef _WIN32
-    int i;
-    HANDLE th;
-    char *clipText, *textCopied;
-#endif
 
     /* detect double presses of tab key */
     static qboolean tab_once = false;
@@ -442,35 +432,6 @@ Key_Console(knum_t key)
 	con->display = con->current;
 	return;
     }
-
-#ifdef _WIN32
-    if ((key == 'V' || key == 'v') && GetKeyState(VK_CONTROL) < 0) {
-	if (OpenClipboard(NULL)) {
-	    th = GetClipboardData(CF_TEXT);
-	    if (th) {
-		clipText = GlobalLock(th);
-		if (clipText) {
-		    textCopied = malloc(GlobalSize(th) + 1);
-		    strcpy(textCopied, clipText);
-		    /* Substitutes a NULL for every token */
-		    strtok(textCopied, "\n\r\b");
-		    i = strlen(textCopied);
-		    if (i + key_linepos >= MAXCMDLINE)
-			i = MAXCMDLINE - key_linepos;
-		    if (i > 0) {
-			textCopied[i] = 0;
-			strcat(key_lines[edit_line], textCopied);
-			key_linepos += i;;
-		    }
-		    free(textCopied);
-		}
-		GlobalUnlock(th);
-	    }
-	    CloseClipboard();
-	    return;
-	}
-    }
-#endif
 
     if (key < 32 || key > 127)
 	return;			// non printable
@@ -903,11 +864,7 @@ Key_Event(knum_t key, qboolean down)
     if ((key_dest == key_menu && menubound[key])
 	|| (key_dest == key_console && !consolekeys[key])
 	|| (key_dest == key_game
-#ifdef NQ_HACK
 	    && (!con_forcedup || !consolekeys[key]))) {
-#else
-	    && (cls.state == ca_active || !consolekeys[key]))) {
-#endif
 	binding = keybindings[key];
 	if (binding) {
 	    if (binding[0] == '+')

@@ -27,19 +27,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "server.h"
 #include "world.h"
 
-#ifdef NQ_HACK
 #include "host.h"
 #include "quakedef.h"
 #include "sys.h"
 /* FIXME - quick hack to enable merging of NQ/QWSV shared code */
 #define SV_Error Sys_Error
-#endif
-#if defined(QW_HACK) && defined(SERVERONLY)
-#include "qwsvdef.h"
-#include "pmove.h"
-/* FIXME - quick hack to enable merging of NQ/QWSV shared code */
-#define Host_Error SV_Error
-#endif
 
 /*
  * Entities never clip against themselves, or their owner.
@@ -135,82 +127,6 @@ typedef struct areanode_s {
 
 static areanode_t sv_areanodes[AREA_NODES];
 static int sv_numareanodes;
-
-#if defined(QW_HACK) && defined(SERVERONLY)
-/*
-====================
-AddLinksToPhysents
-
-====================
-*/
-static void
-SV_AddLinksToPhysents_r(const areanode_t *node, const edict_t *player,
-			const vec3_t mins, const vec3_t maxs,
-			physent_stack_t *pestack)
-{
-    const link_t *link, *next;
-    const link_t *const solids = &node->solid_edicts;
-    const edict_t *check;
-    int i, playernum;
-    physent_t *physent;
-
-    playernum = EDICT_TO_PROG(player);
-    physent = &pestack->physents[pestack->numphysent];
-
-    /* touch linked edicts */
-    for (link = solids->next; link != solids; link = next) {
-	next = link->next;
-	check = const_container_of(link, edict_t, area);
-
-	/* player's own missile */
-	if (check->v.owner == playernum)
-	    continue;
-	if (check->v.solid == SOLID_BSP
-	    || check->v.solid == SOLID_BBOX
-	    || check->v.solid == SOLID_SLIDEBOX) {
-	    if (check == player)
-		continue;
-	    for (i = 0; i < 3; i++)
-		if (check->v.absmin[i] > maxs[i]
-		    || check->v.absmax[i] < mins[i])
-		    break;
-	    if (i != 3)
-		continue;
-	    if (pestack->numphysent == MAX_PHYSENTS)
-		return;
-
-	    VectorCopy(check->v.origin, physent->origin);
-	    physent->entitynum = NUM_FOR_EDICT(check);
-	    if (check->v.solid == SOLID_BSP) {
-		const model_t *model = sv.models[(int)(check->v.modelindex)];
-		physent->brushmodel = ConstBrushModel(model);
-	    } else {
-		physent->brushmodel = NULL;
-		VectorCopy(check->v.mins, physent->mins);
-		VectorCopy(check->v.maxs, physent->maxs);
-	    }
-	    physent++;
-	    pestack->numphysent++;
-	}
-    }
-
-    /* recurse down both sides */
-    if (node->axis == -1)
-	return;
-
-    if (maxs[node->axis] > node->dist)
-	SV_AddLinksToPhysents_r(node->children[0], player, mins, maxs, pestack);
-    if (mins[node->axis] < node->dist)
-	SV_AddLinksToPhysents_r(node->children[1], player, mins, maxs, pestack);
-}
-
-void
-SV_AddLinksToPhysents(const edict_t *player, const vec3_t mins,
-		      const vec3_t maxs, physent_stack_t *pestack)
-{
-    SV_AddLinksToPhysents_r(sv_areanodes, player, mins, maxs, pestack);
-}
-#endif
 
 /*
 ===============
@@ -487,7 +403,6 @@ SV_PointContents
 int
 SV_PointContents(const vec3_t point)
 {
-#ifdef NQ_HACK
     int contents;
 
     contents = Mod_HullPointContents(&sv.worldmodel->hulls[0], 0, point);
@@ -495,10 +410,6 @@ SV_PointContents(const vec3_t point)
 	contents = CONTENTS_WATER;
 
     return contents;
-#endif
-#if defined(QW_HACK) && defined(SERVERONLY)
-    return Mod_HullPointContents(&sv.worldmodel->hulls[0], 0, point);
-#endif
 }
 
 //===========================================================================

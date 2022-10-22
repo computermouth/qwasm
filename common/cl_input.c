@@ -25,15 +25,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "input.h"
 #include "quakedef.h"
 
-#ifdef NQ_HACK
 #include "host.h"
 #include "net.h"
 #include "protocol.h"
-#endif
-
-#ifdef QW_HACK
-static cvar_t cl_nodelta = { "cl_nodelta", "0" };
-#endif
 
 /*
 ===============================================================================
@@ -475,18 +469,13 @@ Send the intended movement message to the server
 void
 CL_BaseMove(usercmd_t *cmd)
 {
-#ifdef NQ_HACK
     if (cls.state != ca_active)
 	return;
-#endif
 
     CL_AdjustAngles();
 
     memset(cmd, 0, sizeof(*cmd));
 
-#ifdef QW_HACK
-    VectorCopy(cl.viewangles, cmd->angles);
-#endif
     if (in_strafe.state & 1) {
 	cmd->sidemove += cl_sidespeed.value * CL_KeyState(&in_right);
 	cmd->sidemove -= cl_sidespeed.value * CL_KeyState(&in_left);
@@ -512,7 +501,6 @@ CL_BaseMove(usercmd_t *cmd)
     }
 }
 
-#ifdef NQ_HACK
 /*
 ==============
 CL_SendMove
@@ -627,173 +615,6 @@ CL_SendCmd(void)
 
     SZ_Clear(&cls.message);
 }
-#endif // NQ_HACK
-
-#ifdef QW_HACK
-static int
-MakeChar(int i)
-{
-    i &= ~3;
-    if (i < -127 * 4)
-	i = -127 * 4;
-    if (i > 127 * 4)
-	i = 127 * 4;
-    return i;
-}
-
-/*
-==============
-CL_FinishMove
-==============
-*/
-static void
-CL_FinishMove(usercmd_t *cmd)
-{
-    int i;
-    int ms;
-
-//
-// always dump the first two message, because it may contain leftover inputs
-// from the last level
-//
-    if (++cl.movemessages <= 2)
-	return;
-//
-// figure button bits
-//
-    if (in_attack.state & 3)
-	cmd->buttons |= 1;
-    in_attack.state &= ~2;
-
-    if (in_jump.state & 3)
-	cmd->buttons |= 2;
-    in_jump.state &= ~2;
-
-    // send milliseconds of time to apply the move
-    ms = host_frametime * 1000;
-    if (ms > 250)
-	ms = 100;		// time was unreasonable
-    cmd->msec = ms;
-
-    VectorCopy(cl.viewangles, cmd->angles);
-
-    cmd->impulse = in_impulse;
-    in_impulse = 0;
-
-
-//
-// chop down so no extra bits are kept that the server wouldn't get
-//
-    cmd->forwardmove = MakeChar(cmd->forwardmove);
-    cmd->sidemove = MakeChar(cmd->sidemove);
-    cmd->upmove = MakeChar(cmd->upmove);
-
-    for (i = 0; i < 3; i++)
-	cmd->angles[i] =
-	    ((int)(cmd->angles[i] * 65536.0 / 360) & 65535) * (360.0 /
-							       65536.0);
-}
-
-/*
-=================
-CL_SendCmd
-=================
-*/
-void
-CL_SendCmd(const physent_stack_t *pestack)
-{
-    sizebuf_t buf;
-    byte data[128];
-    int i;
-    usercmd_t *cmd, *oldcmd;
-    int checksumIndex;
-    int lost;
-    int seq_hash;
-
-    if (cls.demoplayback)
-	return;			// sendcmds come from the demo
-
-    // save this command off for prediction
-    i = cls.netchan.outgoing_sequence & UPDATE_MASK;
-    cmd = &cl.frames[i].cmd;
-    cl.frames[i].senttime = realtime;
-    cl.frames[i].receivedtime = -1;	// we haven't gotten a reply yet
-
-//      seq_hash = (cls.netchan.outgoing_sequence & 0xffff) ; // ^ QW_CHECK_HASH;
-    seq_hash = cls.netchan.outgoing_sequence;
-
-    // get basic movement from keyboard
-    CL_BaseMove(cmd);
-
-    // allow mice or other external controllers to add to the move
-    IN_Move(cmd);
-
-    // if we are spectator, try autocam
-    if (cl.spectator)
-	Cam_Track(cmd, pestack);
-
-    CL_FinishMove(cmd);
-
-    Cam_FinishMove(cmd);
-
-// send this and the previous cmds in the message, so
-// if the last packet was dropped, it can be recovered
-    buf.maxsize = 128;
-    buf.cursize = 0;
-    buf.data = data;
-
-    MSG_WriteByte(&buf, clc_move);
-
-    // save the position for a checksum byte
-    checksumIndex = buf.cursize;
-    MSG_WriteByte(&buf, 0);
-
-    // write our lossage percentage
-    lost = CL_CalcNet();
-    MSG_WriteByte(&buf, (byte)lost);
-
-    i = (cls.netchan.outgoing_sequence - 2) & UPDATE_MASK;
-    cmd = &cl.frames[i].cmd;
-    MSG_WriteDeltaUsercmd(&buf, &nullcmd, cmd);
-    oldcmd = cmd;
-
-    i = (cls.netchan.outgoing_sequence - 1) & UPDATE_MASK;
-    cmd = &cl.frames[i].cmd;
-    MSG_WriteDeltaUsercmd(&buf, oldcmd, cmd);
-    oldcmd = cmd;
-
-    i = (cls.netchan.outgoing_sequence) & UPDATE_MASK;
-    cmd = &cl.frames[i].cmd;
-    MSG_WriteDeltaUsercmd(&buf, oldcmd, cmd);
-
-    // calculate a checksum over the move commands
-    buf.data[checksumIndex] =
-	COM_BlockSequenceCRCByte(buf.data + checksumIndex + 1,
-				 buf.cursize - checksumIndex - 1, seq_hash);
-
-    // request delta compression of entities
-    if (cls.netchan.outgoing_sequence - cl.validsequence >= UPDATE_BACKUP - 1)
-	cl.validsequence = 0;
-
-    if (cl.validsequence && !cl_nodelta.value && cls.state == ca_active &&
-	!cls.demorecording) {
-	cl.frames[cls.netchan.outgoing_sequence & UPDATE_MASK].
-	    delta_sequence = cl.validsequence;
-	MSG_WriteByte(&buf, clc_delta);
-	MSG_WriteByte(&buf, cl.validsequence & 255);
-    } else
-	cl.frames[cls.netchan.outgoing_sequence & UPDATE_MASK].
-	    delta_sequence = -1;
-
-    if (cls.demorecording)
-	CL_WriteDemoCmd(cmd);
-
-//
-// deliver the message
-//
-    Netchan_Transmit(&cls.netchan, buf.cursize, buf.data);
-}
-#endif // QW_HACK
 
 void
 CL_Input_AddCommands(void)
@@ -838,7 +659,4 @@ CL_Input_AddCommands(void)
 void
 CL_Input_RegisterVariables()
 {
-#ifdef QW_HACK
-    Cvar_RegisterVariable(&cl_nodelta);
-#endif
 }

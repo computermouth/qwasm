@@ -26,12 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "qtypes.h"
 #include "render.h"
 
-#ifdef NQ_HACK
 #include "host.h"
-#endif
-#ifdef QW_HACK
-#include "quakedef.h"
-#endif
 
 float map_wateralpha;
 float map_slimealpha;
@@ -41,7 +36,6 @@ float map_telealpha;
 int r_surfalpha_flags;
 depthchain_t r_depthchain;
 
-#ifndef GLQUAKE
 static int num_transtables;
 const byte *transtable_water;
 const byte *transtable_slime;
@@ -62,12 +56,10 @@ Alpha_Transtable(float alpha)
 
     return host_transtables[tablenum];
 }
-#endif
 
 void
 Alpha_Init()
 {
-#ifndef GLQUAKE
     int i;
     float alphastep;
     byte *tables;
@@ -83,7 +75,6 @@ Alpha_Init()
         host_transtables[i] = &tables[i * 65536];
         QPal_CreateTranslucencyTable(host_transtables[i], host_basepal, alphastep * (i + 1));
     }
-#endif
     r_surfalpha_flags = 0;
 }
 
@@ -100,12 +91,10 @@ Alpha_Updated()
     if ((map_telealpha  == 0 && map_wateralpha < 1.0f) || (map_telealpha  > 0.0f && map_telealpha  < 1.0f))
         r_surfalpha_flags |= SURF_DRAWTELE;
 
-#ifndef GLQUAKE
     transtable_water = Alpha_Transtable(map_wateralpha);
     transtable_slime = Alpha_Transtable((map_slimealpha > 0) ? map_slimealpha : map_wateralpha);
     transtable_lava  = Alpha_Transtable((map_lavaalpha  > 0) ? map_lavaalpha  : map_wateralpha);
     transtable_tele  = Alpha_Transtable((map_telealpha  > 0) ? map_telealpha  : map_wateralpha);
-#endif
 }
 
 static void R_WaterAlpha_f(cvar_t *cvar) { map_wateralpha = qclamp(cvar->value, 0.0f, 1.0f); Alpha_Updated(); }
@@ -237,48 +226,6 @@ DepthChain_Init(depthchain_t *head)
     head->entity = NULL;
     head->next = head->prev = head;
 }
-
-#ifdef GLQUAKE
-void
-DepthChain_AddSurf(depthchain_t *head, entity_t *entity, msurface_t *surf, depthchain_type_t type)
-{
-    float alpha;
-    vec3_t vec;
-    int i, key, vkey;
-    const float *vertex;
-    brushmodel_t *brushmodel = BrushModel(entity->model);
-
-    // This is probably terribly inefficient, but for proper depth
-    // sorting we really need to know the point at which the surf is
-    // deepest into the scene to use as the sort key.
-    key = INT_MIN;
-    for (i = 0; i < surf->numedges; i++) {
-	const int edgenum = brushmodel->surfedges[surf->firstedge + i];
-	if (edgenum >= 0) {
-	    const medge_t *const edge = &brushmodel->edges[edgenum];
-	    vertex = brushmodel->vertexes[edge->v[0]].position;
-	} else {
-	    const medge_t *const edge = &brushmodel->edges[-edgenum];
-	    vertex = brushmodel->vertexes[edge->v[1]].position;
-	}
-        VectorSubtract(vertex, r_refdef.vieworg, vec);
-        vkey = DotProduct(vec, vec); // depth value squared
-        if (vkey > key)
-            key = vkey;
-    }
-
-    surf->depthchain.key = key;
-    surf->depthchain.type = type;
-    surf->depthchain.entity = entity;
-    if (surf->flags & r_surfalpha_flags) {
-        alpha = ENTALPHA_DECODE(entity->alpha) * R_GetSurfAlpha(surf->flags);
-        surf->depthchain.alpha = ENTALPHA_ENCODE(alpha);
-    } else {
-        surf->depthchain.alpha = entity->alpha;
-    }
-    DepthChain_Insert(head, &surf->depthchain);
-}
-#endif
 
 void
 DepthChain_AddEntity(depthchain_t *head, entity_t *entity, depthchain_type_t type)

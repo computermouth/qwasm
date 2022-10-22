@@ -31,14 +31,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "sys.h"
 #include "zone.h"
 
-#ifdef NQ_HACK
 #include "host.h"
 #include "protocol.h"
-#endif
-
-#ifndef SERVERONLY
-static void Cmd_ForwardToServer_f(void);
-#endif
 
 #define	MAX_ALIAS_NAME	32
 
@@ -197,12 +191,7 @@ Cbuf_Execute(void)
 	}
 
 	/* execute the command line */
-#ifdef NQ_HACK
 	Cmd_ExecuteString(line, src_command);
-#endif
-#ifdef QW_HACK
-	Cmd_ExecuteString(line);
-#endif
 
 	if (cmd_wait) {
 	    /*
@@ -450,9 +439,7 @@ static const char *cmd_argv[MAX_ARGS];
 static const char *cmd_null_string = "";
 static const char *cmd_args = NULL;
 
-#ifdef NQ_HACK
 cmd_source_t cmd_source;
-#endif
 
 /*
 ============
@@ -467,9 +454,6 @@ Cmd_AddCommands(void)
     Cmd_AddCommand("echo", Cmd_Echo_f);
     Cmd_AddCommand("alias", Cmd_Alias_f);
     Cmd_AddCommand("wait", Cmd_Wait_f);
-#ifndef SERVERONLY
-    Cmd_AddCommand("cmd", Cmd_ForwardToServer_f);
-#endif
 }
 
 /*
@@ -635,7 +619,6 @@ Cmd_Alias_Exists(const char *cmd_name)
     return Cmd_Alias_Find(cmd_name) != NULL;
 }
 
-#ifndef SERVERONLY
 /*
 ===================
 Cmd_ForwardToServer
@@ -666,12 +649,7 @@ Cmd_ForwardToServer(void)
     if (!Cmd_ForwardCheckConnected())
 	return;
 
-#ifdef QW_HACK
-    message = &cls.netchan.message;
-#endif
-#ifdef NQ_HACK
     message = &cls.message;
-#endif
     MSG_WriteByte(message, clc_stringcmd);
     SZ_Print(message, Cmd_Argv(0));
     if (Cmd_Argc() > 1) {
@@ -681,43 +659,6 @@ Cmd_ForwardToServer(void)
 }
 
 /*
-===================
-Cmd_ForwardToServer_f
-
-Sends the arguments as a command line to the server
-===================
-*/
-static void
-Cmd_ForwardToServer_f(void)
-{
-    sizebuf_t *message;
-
-    if (!Cmd_ForwardCheckConnected())
-	return;
-
-#ifdef QW_HACK
-    message = &cls.netchan.message;
-#endif
-#ifdef NQ_HACK
-    message = &cls.message;
-#endif
-
-    /*
-     * FIXME - hack for QW's snap command.
-     * Used to work during demo playback?
-     */
-    if (!strcasecmp(Cmd_Argv(1), "snap")) {
-	Cbuf_InsertText("snap\n");
-	return;
-    }
-
-    if (Cmd_Argc() > 1) {
-	MSG_WriteByte(message, clc_stringcmd);
-	SZ_Print(message, Cmd_Args());
-    }
-}
-#endif /* !SERVERONLY */
-/*
 ============
 Cmd_ExecuteString
 
@@ -726,19 +667,12 @@ FIXME: lookupnoadd the token to speed search?
 ============
 */
 void
-#ifdef NQ_HACK
 Cmd_ExecuteString(const char *text, cmd_source_t src)
-#endif
-#ifdef QW_HACK
-Cmd_ExecuteString(const char *text)
-#endif
 {
     cmd_function_t *cmd;
     cmdalias_t *a;
 
-#ifdef NQ_HACK
     cmd_source = src;
-#endif
     Cmd_TokenizeString(text);
 
 // execute the command line
@@ -750,10 +684,6 @@ Cmd_ExecuteString(const char *text)
     if (cmd) {
 	if (cmd->function)
 	    cmd->function();
-#ifndef SERVERONLY
-	else
-	    Cmd_ForwardToServer();
-#endif
 	return;
     }
 

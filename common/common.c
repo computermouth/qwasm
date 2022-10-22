@@ -27,21 +27,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#ifdef NQ_HACK
 #include "quakedef.h"
 #include "host.h"
-#endif
-
-#ifdef QW_HACK
-#ifdef SERVERONLY
-#include "qwsvdef.h"
-#include "server.h"
-#else
-#include "client.h"
-#include "quakedef.h"
-#endif
-#include "protocol.h"
-#endif
 
 #include "cmd.h"
 #include "common.h"
@@ -195,18 +182,6 @@ InsertLinkBefore(link_t *l, link_t *before)
     l->next->prev = l;
 }
 
-/* Unused */
-#if 0
-void
-InsertLinkAfter(link_t *l, link_t *after)
-{
-    l->next = after->next;
-    l->prev = after;
-    l->prev->next = l;
-    l->next->prev = l;
-}
-#endif
-
 /*
 ============================================================================
 
@@ -357,10 +332,6 @@ Handles byte ordering and avoids alignment errors
 ==============================================================================
 */
 
-#ifdef QW_HACK
-usercmd_t nullcmd;		// guarenteed to be zero
-#endif
-
 //
 // writing functions
 //
@@ -369,11 +340,6 @@ void
 MSG_WriteChar(sizebuf_t *sb, int c)
 {
     byte *buf;
-
-#ifdef PARANOID
-    if (c < -128 || c > 127)
-	Sys_Error("%s: range error", __func__);
-#endif
 
     buf = SZ_GetSpace(sb, 1);
     buf[0] = c;
@@ -384,11 +350,6 @@ MSG_WriteByte(sizebuf_t *sb, int c)
 {
     byte *buf;
 
-#ifdef PARANOID
-    if (c < 0 || c > 255)
-	Sys_Error("%s: range error", __func__);
-#endif
-
     buf = SZ_GetSpace(sb, 1);
     buf[0] = c;
 }
@@ -397,11 +358,6 @@ void
 MSG_WriteShort(sizebuf_t *sb, int c)
 {
     byte *buf;
-
-#ifdef PARANOID
-    if (c < ((short)0x8000) || c > (short)0x7fff)
-	Sys_Error("%s: range error", __func__);
-#endif
 
     buf = SZ_GetSpace(sb, 2);
     buf[0] = c & 0xff;
@@ -492,59 +448,6 @@ MSG_WriteAngle16(sizebuf_t *sb, float f)
     MSG_WriteShort(sb, (int)floorf((f * 65536 / 360) + 0.5f) & 65535);
 }
 
-#ifdef QW_HACK
-void
-MSG_WriteDeltaUsercmd(sizebuf_t *buf, const usercmd_t *from,
-		      const usercmd_t *cmd)
-{
-    int bits;
-
-//
-// send the movement message
-//
-    bits = 0;
-    if (cmd->angles[0] != from->angles[0])
-	bits |= CM_ANGLE1;
-    if (cmd->angles[1] != from->angles[1])
-	bits |= CM_ANGLE2;
-    if (cmd->angles[2] != from->angles[2])
-	bits |= CM_ANGLE3;
-    if (cmd->forwardmove != from->forwardmove)
-	bits |= CM_FORWARD;
-    if (cmd->sidemove != from->sidemove)
-	bits |= CM_SIDE;
-    if (cmd->upmove != from->upmove)
-	bits |= CM_UP;
-    if (cmd->buttons != from->buttons)
-	bits |= CM_BUTTONS;
-    if (cmd->impulse != from->impulse)
-	bits |= CM_IMPULSE;
-
-    MSG_WriteByte(buf, bits);
-
-    if (bits & CM_ANGLE1)
-	MSG_WriteAngle16(buf, cmd->angles[0]);
-    if (bits & CM_ANGLE2)
-	MSG_WriteAngle16(buf, cmd->angles[1]);
-    if (bits & CM_ANGLE3)
-	MSG_WriteAngle16(buf, cmd->angles[2]);
-
-    if (bits & CM_FORWARD)
-	MSG_WriteShort(buf, cmd->forwardmove);
-    if (bits & CM_SIDE)
-	MSG_WriteShort(buf, cmd->sidemove);
-    if (bits & CM_UP)
-	MSG_WriteShort(buf, cmd->upmove);
-
-    if (bits & CM_BUTTONS)
-	MSG_WriteByte(buf, cmd->buttons);
-    if (bits & CM_IMPULSE)
-	MSG_WriteByte(buf, cmd->impulse);
-    MSG_WriteByte(buf, cmd->msec);
-}
-#endif /* QW_HACK */
-
-#ifdef NQ_HACK
 /*
  * Write the current message length to the start of the buffer (in big
  * endian format) with the control flag set.
@@ -559,7 +462,6 @@ MSG_WriteControlHeader(sizebuf_t *sb)
     sb->data[2] = (c >> 8) & 0xff;
     sb->data[3] = c & 0xff;
 }
-#endif
 
 //
 // reading functions
@@ -573,14 +475,6 @@ MSG_BeginReading(void)
     msg_readcount = 0;
     msg_badread = false;
 }
-
-#ifdef QW_HACK
-int
-MSG_GetReadCount(void)
-{
-    return msg_readcount;
-}
-#endif
 
 // returns -1 and sets msg_badread if no more characters are available
 int
@@ -693,28 +587,6 @@ MSG_ReadString(void)
     return buf;
 }
 
-#ifdef QW_HACK
-char *
-MSG_ReadStringLine(void)
-{
-    char *buf;
-    int len, c;
-
-    buf = COM_GetStrBuf();
-    len = 0;
-    do {
-	c = MSG_ReadChar();
-	if (c == -1 || c == 0 || c == '\n')
-	    break;
-	buf[len++] = c;
-    } while (len < COM_STRBUF_LEN - 1);
-
-    buf[len] = 0;
-
-    return buf;
-}
-#endif
-
 float
 MSG_ReadCoord(void)
 {
@@ -737,45 +609,6 @@ MSG_ReadAngle16(void)
     return MSG_ReadShort() * (360.0 / 65536);
 }
 
-#ifdef QW_HACK
-void
-MSG_ReadDeltaUsercmd(const usercmd_t *from, usercmd_t *move)
-{
-    int bits;
-
-    memcpy(move, from, sizeof(*move));
-
-    bits = MSG_ReadByte();
-
-// read current angles
-    if (bits & CM_ANGLE1)
-	move->angles[0] = MSG_ReadAngle16();
-    if (bits & CM_ANGLE2)
-	move->angles[1] = MSG_ReadAngle16();
-    if (bits & CM_ANGLE3)
-	move->angles[2] = MSG_ReadAngle16();
-
-// read movement
-    if (bits & CM_FORWARD)
-	move->forwardmove = MSG_ReadShort();
-    if (bits & CM_SIDE)
-	move->sidemove = MSG_ReadShort();
-    if (bits & CM_UP)
-	move->upmove = MSG_ReadShort();
-
-// read buttons
-    if (bits & CM_BUTTONS)
-	move->buttons = MSG_ReadByte();
-
-    if (bits & CM_IMPULSE)
-	move->impulse = MSG_ReadByte();
-
-// read time to run command
-    move->msec = MSG_ReadByte();
-}
-#endif /* QW_HACK */
-
-#ifdef NQ_HACK
 /*
  * Read back the message control header
  * Essentially this is MSG_ReadLong, but big-endian byte order.
@@ -799,7 +632,6 @@ MSG_ReadControlHeader(void)
 
     return c;
 }
-#endif
 
 //===========================================================================
 
@@ -1063,12 +895,7 @@ COM_Parse_(const char *data, qboolean split_single_chars)
 const char *
 COM_Parse(const char *data)
 {
-#ifdef NQ_HACK
     return COM_Parse_(data, true);
-#endif
-#ifdef QW_HACK
-    return COM_Parse_(data, false);
-#endif
 }
 
 /*
@@ -1117,17 +944,9 @@ COM_CheckRegistered(void)
 
     if (!f) {
 	Con_Printf("Playing shareware version.\n");
-#ifndef SERVERONLY
 	if (com_modified)
-#ifdef NQ_HACK
 	    Sys_Error("You must have the registered version "
 		      "to use modified games");
-#endif
-#ifdef QW_HACK
-	    Sys_Error("You must have the registered version "
-		      "to play QuakeWorld");
-#endif
-#endif /* SERVERONLY */
 	return;
     }
 
@@ -1185,21 +1004,6 @@ COM_InitArgv(int argc, const char **argv)
     largv[com_argc] = argvdummy;
     com_argv = largv;
 }
-
-/*
-================
-COM_AddParm
-
-Adds the given string at the end of the current argument list
-================
-*/
-#ifdef QW_HACK
-void
-COM_AddParm(const char *parm)
-{
-    largv[com_argc++] = parm;
-}
-#endif
 
 void
 COM_AddCommands()
@@ -1348,10 +1152,6 @@ COM_Path_f(void)
 
     Con_Printf("Current search path:\n");
     for (s = com_searchpaths; s; s = s->next) {
-#ifdef QW_HACK
-	if (s == com_base_searchpaths)
-	    Con_Printf("----------\n");
-#endif
 	if (s->pack)
 	    Con_Printf("%s (%i files)\n", s->pack->filename,
 		       s->pack->numfiles);
@@ -1665,14 +1465,10 @@ COM_ScanBaseDir(struct stree_root *root, const char *prefix)
 static void
 COM_ReadFileAndClose(byte *buffer, size_t filesize, FILE *f)
 {
-#ifndef SERVERONLY
     Draw_BeginDisc();
-#endif
     fread(buffer, 1, filesize, f);
     fclose(f);
-#ifndef SERVERONLY
     Draw_EndDisc();
-#endif
 }
 
 void *
@@ -1801,14 +1597,9 @@ COM_LoadPackFile(const char *packfile)
     /* crc the directory to check for modifications */
     crc = CRC_Block((byte *)dfiles, header.dirlen);
     switch (crc) {
-#ifdef NQ_HACK
     case ID1_PAK0_CRC_V100:
     case ID1_PAK0_CRC_V101:
     case ID1_PAK0_CRC_V106:
-#endif
-#ifdef QW_HACK
-    case QW_PAK0_CRC:
-#endif
 	com_modified = false;
 	break;
     default:
@@ -1996,9 +1787,6 @@ COM_Gamedir(const char *directory, enum game_type game_type)
     /* flush all data, so it will be forced to reload */
     Cache_Flush();
     Mod_ClearAll();
-#ifdef GLQUAKE
-    Draw_ResetPicTextures();
-#endif
 
     /* Free up any current game directory info */
     host_hunklevel = 0;
@@ -2048,14 +1836,6 @@ COM_InitFileSystem()
     COM_AddGameDirectory(com_basedir, "id1");
     if (home)
         COM_AddGameDirectory(va("%s/.tyrquake", home), "id1");
-
-#ifdef QW_HACK
-    COM_AddGameDirectory(com_basedir, "qw");
-    if (home)
-        COM_AddGameDirectory(va("%s/.tyrquake", home), "qw");
-    com_modified = true;
-    com_game_type = GAME_TYPE_QW;
-#endif
 
     com_base_searchpaths = com_searchpaths;
     com_basedir_mark = Hunk_LowMark();
@@ -2127,17 +1907,6 @@ COM_InitGameDirectoryFromCommandLine()
 {
     enum game_type game_type = GAME_TYPE_ID1;
     const char *game_directory = "id1";
-
-    /* Check for mission pack parameters */
-#ifdef NQ_HACK
-    if (COM_CheckParm("-hipnotic")) {
-        game_type = GAME_TYPE_HIPNOTIC;
-    } else if (COM_CheckParm("-quoth")) {
-        game_type = GAME_TYPE_QUOTH;
-    } else if (COM_CheckParm("-rogue")) {
-        game_type = GAME_TYPE_ROGUE;
-    }
-#endif
 
     /* Check the -game parameter */
     int i = COM_CheckParm("-game");

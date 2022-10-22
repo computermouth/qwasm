@@ -30,42 +30,24 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <time.h>
 #include <unistd.h>
 
-#ifndef SERVERONLY
 #include <signal.h>
 #include <sys/ipc.h>
 #include <sys/mman.h>
-#endif
 
 #include "buildinfo.h"
 #include "common.h"
 #include "sys.h"
 #include "zone.h"
 
-#ifdef SERVERONLY
-#include "cvar.h"
-#include "net.h"
-#include "qwsvdef.h"
-#include "server.h"
-#else
 #include "quakedef.h"
-#endif
 
-#ifdef NQ_HACK
 #include "client.h"
 #include "host.h"
-#endif
 
 qboolean isDedicated;
 
-#ifdef SERVERONLY
-static cvar_t sys_nostdout = { "sys_nostdout", "0" };
-static cvar_t sys_extrasleep = { "sys_extrasleep", "0" };
-static qboolean stdin_ready;
-static int do_stdin = 1;
-#else
 static qboolean noconinput = false;
 static qboolean nostdout = false;
-#endif
 
 /*
  * ===========================================================================
@@ -84,55 +66,36 @@ Sys_Printf(const char *fmt, ...)
     qvsnprintf(text, sizeof(text), fmt, argptr);
     va_end(argptr);
 
-#ifdef SERVERONLY
-    if (sys_nostdout.value)
-	return;
-#else
     if (nostdout)
 	return;
-#endif
 
     for (p = (unsigned char *)text; *p; p++) {
-#ifdef SERVERONLY
-	*p &= 0x7f;
-#endif
 	if ((*p > 128 || *p < 32) && *p != 10 && *p != 13 && *p != 9)
 	    printf("[%02x]", *p);
 	else
 	    putc(*p, stdout);
     }
-#ifdef SERVERONLY
-    fflush(stdout);
-#endif
 }
 
 void
 Sys_Quit(void)
 {
-#ifndef SERVERONLY
     Host_Shutdown();
     fcntl(STDIN_FILENO, F_SETFL,
 	  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
     fflush(stdout);
-#endif
     exit(0);
 }
 
 void
 Sys_RegisterVariables()
 {
-#ifdef SERVERONLY
-    Cvar_RegisterVariable(&sys_nostdout);
-    Cvar_RegisterVariable(&sys_extrasleep);
-#endif
 }
 
 void
 Sys_Init(void)
 {
-#ifndef SERVERONLY
     Sys_SetFPCW();
-#endif
 }
 
 void
@@ -141,20 +104,16 @@ Sys_Error(const char *error, ...)
     va_list argptr;
     char string[MAX_PRINTMSG];
 
-#ifndef SERVERONLY
     /* remove non-blocking flag from standard input */
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags & ~O_NONBLOCK);
-#endif
 
     va_start(argptr, error);
     qvsnprintf(string, sizeof(string), error, argptr);
     va_end(argptr);
     fprintf(stderr, "Error: %s\n", string);
 
-#ifndef SERVERONLY
     Host_Shutdown();
-#endif
     exit(1);
 }
 
@@ -179,14 +138,7 @@ Sys_FileTime(const char *path)
 void
 Sys_mkdir(const char *path)
 {
-#ifdef SERVERONLY
-    if (mkdir(path, 0777) != -1)
-	return;
-    if (errno != EEXIST)
-	Sys_Error("mkdir %s: %s", path, strerror(errno));
-#else
     mkdir(path, 0777);
-#endif
 }
 
 double
@@ -206,7 +158,6 @@ Sys_DoubleTime(void)
     return (tp.tv_sec - secbase) + tp.tv_usec / 1000000.0;
 }
 
-#if defined(NQ_HACK) || defined(SERVERONLY)
 /*
 ================
 Sys_ConsoleInput
@@ -220,7 +171,6 @@ Sys_ConsoleInput(void)
 {
     static char text[256];
     int len;
-#ifdef NQ_HACK
     fd_set fdset;
     struct timeval timeout;
 
@@ -234,28 +184,14 @@ Sys_ConsoleInput(void)
     if (select(STDIN_FILENO + 1, &fdset, NULL, NULL, &timeout) == -1
 	|| !FD_ISSET(STDIN_FILENO, &fdset))
 	return NULL;
-#endif
-#ifdef SERVERONLY
-    /* check that the select returned ready */
-    if (!stdin_ready || !do_stdin)
-	return NULL;
-    stdin_ready = false;
-#endif
-
     len = read(STDIN_FILENO, text, sizeof(text));
-#ifdef SERVERONLY
-    if (len == 0)
-	do_stdin = 0; /* end of file */
-#endif
     if (len < 1)
 	return NULL;
     text[len - 1] = 0; /* remove the /n and terminate */
 
     return text;
 }
-#endif /* NQ_HACK || SERVERONLY */
 
-#ifndef SERVERONLY
 void
 Sys_Sleep(void)
 {
@@ -284,11 +220,9 @@ Sys_DebugLog(const char *file, const char *fmt, ...)
     close(fd);
 }
 
-#ifndef USE_X86_ASM
 void Sys_HighFPPrecision(void) {}
 void Sys_LowFPPrecision(void) {}
 void Sys_SetFPCW(void) {}
-#endif
 
 /*
 ================
@@ -298,20 +232,6 @@ Sys_MakeCodeWriteable
 void
 Sys_MakeCodeWriteable(void *start_addr, void *end_addr)
 {
-#ifdef USE_X86_ASM
-    void *addr;
-    size_t length;
-    intptr_t pagesize;
-    int result;
-
-    pagesize = getpagesize();
-    addr = (void *)((intptr_t)start_addr & ~(pagesize - 1));
-    length = ((byte *)end_addr - (byte *)addr) + pagesize - 1;
-    length &= ~(pagesize - 1);
-    result = mprotect(addr, length, PROT_READ | PROT_WRITE | PROT_EXEC);
-    if (result < 0)
-	Sys_Error("Protection change failed");
-#endif
 }
 
 /*
@@ -322,25 +242,8 @@ Sys_MakeCodeUnwriteable
 void
 Sys_MakeCodeUnwriteable(void *start_addr, void *end_addr)
 {
-#ifdef USE_X86_ASM
-    void *addr;
-    size_t length;
-    intptr_t pagesize;
-    int result;
-
-    pagesize = getpagesize();
-    addr = (void *)((intptr_t)start_addr & ~(pagesize - 1));
-    length = ((byte *)end_addr - (byte *)addr) + pagesize - 1;
-    length &= ~(pagesize - 1);
-    result = mprotect(addr, length, PROT_READ | PROT_EXEC);
-    if (result < 0)
-	Sys_Error("Protection change failed");
-
-    __builtin___clear_cache(start_addr, end_addr);
-#endif
 }
 
-#endif /* !SERVERONLY */
 
 /*
  * ===========================================================================
@@ -353,14 +256,8 @@ main(int argc, char **argv)
 {
     double time, oldtime, newtime;
     quakeparms_t parms;
-#ifdef SERVERONLY
-    fd_set fdset;
-    struct timeval timeout;
-#endif
 
-#ifndef SERVERONLY
     signal(SIGFPE, SIG_IGN);
-#endif
 
     memset(&parms, 0, sizeof(parms));
 
@@ -373,12 +270,6 @@ main(int argc, char **argv)
     if (!parms.membase)
 	Sys_Error("Allocation of %d byte heap failed", parms.memsize);
 
-#ifdef SERVERONLY
-    SV_Init(&parms);
-
-    /* run one frame immediately for first heartbeat */
-    SV_Frame(0.1);
-#else
     if (COM_CheckParm("-noconinput"))
 	noconinput = true;
     if (COM_CheckParm("-nostdout"))
@@ -390,49 +281,21 @@ main(int argc, char **argv)
 	fcntl(STDIN_FILENO, F_SETFL,
 	      fcntl(STDIN_FILENO, F_GETFL, 0) | O_NONBLOCK);
     if (!nostdout)
-#ifdef NQ_HACK
 	printf("Quake -- TyrQuake Version %s\n", build_version);
-#endif
-#ifdef QW_HACK
-	printf("QuakeWorld -- TyrQuake Version %s\n", build_version);
-#endif
 
     Sys_Init();
     Host_Init(&parms, NULL);
-#endif /* SERVERONLY */
 
     /*
      * Main Loop
      */
-#if defined(NQ_HACK) || defined(SERVERONLY)
     oldtime = Sys_DoubleTime() - 0.1;
-#else
-    oldtime = Sys_DoubleTime();
-#endif
     while (1) {
-#ifdef SERVERONLY
-	/*
-	 * select on the net socket and stdin
-	 * the only reason we have a timeout at all is so that if the last
-	 * connected client times out, the message would not otherwise
-	 * be printed until the next event.
-	 */
-	FD_ZERO(&fdset);
-	if (do_stdin)
-	    FD_SET(0, &fdset);
-	FD_SET(net_socket, &fdset);
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	if (select(net_socket + 1, &fdset, NULL, NULL, &timeout) == -1)
-	    continue;
-	stdin_ready = FD_ISSET(0, &fdset);
-#endif
 
 	/* find time passed since last cycle */
 	newtime = Sys_DoubleTime();
 	time = newtime - oldtime;
 
-#ifdef NQ_HACK
 	if (cls.state == ca_dedicated) {
 	    if (time < sys_ticrate.value) {
 		usleep(1);
@@ -444,23 +307,8 @@ main(int argc, char **argv)
 	    oldtime = newtime;
 	else
 	    oldtime += time;
-#endif
-#ifdef QW_HACK
-	oldtime = newtime;
-#endif
 
-#ifdef SERVERONLY
-	SV_Frame(time);
-
-	/*
-	 * extrasleep is just a way to generate a fucked up connection
-	 * on purpose
-	 */
-	if (sys_extrasleep.value)
-	    usleep(sys_extrasleep.value);
-#else
 	Host_Frame(time);
-#endif
     }
 
     return 0;

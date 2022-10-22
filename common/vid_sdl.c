@@ -42,23 +42,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "view.h"
 #include "wad.h"
 
-#ifdef _WIN32
-#include "winquake.h"
-#endif
-
-#ifdef NQ_HACK
 #include "host.h"
-#endif
-#ifdef QW_HACK
-#include "client.h"
-#endif
-
-// FIXME: evil hack to get full DirectSound support with SDL
-#ifdef _WIN32
-#include <windows.h>
-HWND mainwindow;
-qboolean DDActive = false;
-#endif
 
 static SDL_Renderer *renderer = NULL;
 static SDL_Texture *texture = NULL;
@@ -555,10 +539,8 @@ VID_UnlockBuffer(void)
 {
 }
 
-#ifndef _WIN32
 void
 Sys_SendKeyEvents(void)
 {
     VID_ProcessEvents();
 }
-#endif
